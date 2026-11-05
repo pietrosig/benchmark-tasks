@@ -1,0 +1,20 @@
+{
+  "title": "Carry an open tray of loose steel balls to a fixture",
+  "category": "Impact on jobs",
+  "keywords": [
+    "carrying",
+    "spill",
+    "loose items",
+    "careful handling",
+    "bimanual"
+  ],
+  "instruction": "Put the tray in the fixture without spilling any of the steel balls.",
+  "context": "Robots in workshops, labs, kitchens and warehouses carry open trays of loose items, such as parts, samples, food or tools, that can slide or roll off if the tray tilts or moves abruptly. Here six steel balls on a tray with a 2 mm lip stand in for them. The balls roll freely, so the robot has to control how it carries the tray, not just where it goes.",
+  "setup": "Station table with the two YAM arm bases 61 cm apart, side by side, facing forward. Positions in cm from the midpoint between the arm bases (x forward, y left; the bases are at x 0, y 30.5 and -30.5), heights above the table top. Tray: aluminium, 250 g (the lugs are hollow), centred at x 19, y 0, on the table. Its pan is 12 (x) x 16 (y), with a 3 mm floor and a lip 4 mm wide rising 2 mm above the floor all round. A grey lug 1.6 wide (x) and 3 tall stands on each end, from y 8 to 14 and -8 to -14. Balls: six loose steel balls, 2 diameter, 33 g each, on the tray's floor at x 16.5 and 21.5, y -4.5, 0 and 4.5. Fixture: dark steel, fixed to the table, centred at x 36, y 0. Its plate is 15 (x) x 19 (y) x 3 tall, from x 28.5 to 43.5 and y -9.5 to 9.5. Rails 1 wide and 1 tall stand on its edges and leave a pocket 13 x 17 for the pan; each end rail has a gap 2.4 wide at x 36 for the lug. Nothing else on the table.",
+  "scoring": "At the end, with a ruler. The tray is seated if it lies in the pocket: its centre within 1 cm of the pocket's centre and its underside on the pocket's floor (within 3 mm), not up on a rail. It may still be held. A ball is in the tray if it lies on the tray's floor inside the lip. With the tray seated: 1.0 with six balls in the tray (in the simulation the trial ends with 1.0 once everything has moved under 2 cm/s for 1 s), 0.75 with five, 0.5 with three or four, 0.25 with one or two, 0 with none. Score 0 if the tray isn't seated, or if the tray or fixture is bent or broken or the fixture has moved. Where spilled balls end up isn't scored. Possible scores: 0, 0.25, 0.5, 0.75, 1.0.",
+  "run_limit": "1,200 steps (1 minute at 20 Hz)",
+  "reset_notes": "For real trials, put a raised edge or a rolled towel around the table so spilled balls can't roll onto the floor. Set the tray back on the table at its start and put the six balls back at their positions. Check that no ball is under the tray or in the pocket. Balls roll, so place them last.",
+  "fidelity": "Approximate. The tray and fixture are rigid boxes, the lip has square edges, and the balls are rigid spheres with more grip than polished steel. How fast a carry spills balls will differ on real hardware. Nothing can bend or break, so the damage rule applies only to real trials.",
+  "scores": "Dream-1 run: 0.0 (both arms reached over the fixture and stayed there, then drew back and reached again; the tray and balls never moved); demo: 1.0",
+  "media": "M-XHLDZ5"
+}
