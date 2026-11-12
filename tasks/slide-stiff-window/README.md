@@ -53,7 +53,7 @@ inspect-robots run --embodiment yam_arena --policy yam_scripted \
 Open loop, right arm only, in one continuous motion after the first move from the park pose: it reaches round to the
 handle from the room side, grips it, pulls the sash 20 cm open over 10 s (about 2 cm/s), opens its fingers over the
 last 1.5 cm while still moving and draws back. With this command the demo succeeds after about 369 steps (18.45 s of
-video): the sash 17.9 cm open, 16.2 cm of it pulled by the gripped handle (the last 1.7 cm came while the fingers
+video): the sash 17.9 cm open, 16.1 cm of it pulled by the gripped handle (the last 1.8 cm came while the fingers
 opened, so it doesn't count), the handle never more than 7.5 mm from rest (about 6 N) (`outcome: succeeded`,
 `task_score: 1`), well within the 1,200-step limit. While the fingers are closed on the bar they read 0.13 open.
 
@@ -68,7 +68,8 @@ Evaluated every control step; the score at the end of the episode counts (`SCORE
   more than how far it is open at that moment. Pushing the sash or its frame, pushing the handle without gripping it, a
   gripped handle that carries no pull (another hand pushing the sash), or the sash moving after the gripper has let go
   adds nothing. In the real setup: from the trial video, the opening made between each time a gripper closes on the grip
-  bar and lets go, measured with a ruler from the left jamb to the sash's left edge.
+  bar and lets go, while no other part of the robot touches the sash, its glass or the frame, measured with a ruler from
+  the left jamb to the sash's left edge.
 - **Torn:** the handle has given 18 mm along the sash, which takes about 14 N, at any point in the trial. It stays torn.
 - With the handle on: **1.0** at 15 cm or more pulled open (`success()` also needs the sash moving under 1 cm/s for 1 s,
   which ends the trial), **0.75** from 12 cm, **0.5** from 8 cm, **0.25** from 4 cm, **0** under 4 cm.
