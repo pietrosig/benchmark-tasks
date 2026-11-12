@@ -16,5 +16,5 @@
   "reset_notes": "Recharge the tank to 6 bar, push its filler pipe back into the coupler until it locks, and put it back at its start. For real trials, keep people out of the area behind the tank (towards the arms) and fit a soft stop 20 cm behind it.",
   "fidelity": "Approximate. Everything is rigid boxes and cylinders; the tank weighs 400 g and can't tip. The jet is a push of 3 N away from the wall that fades as the air runs out (time constant 1.5 s). Through the real plug's 3 mm restrictor at 6 bar the jet starts at about 5 N, within what the arm can hold, and fades within about half a second, driving an unheld tank back past 30 cm/s. The tank slides with viscous drag (100 N s/m).",
   "scores": "Dream-1 run: 0.0 (the right arm reached over to the coupler and the tank and hovered there for the full minute without pressing the coupler's button; the left arm barely moved, so the tank stayed connected); demo: 1.0",
-  "media": ""
+  "media": "M-H3QJT8"
 }
