@@ -25,13 +25,34 @@ import task as T  # noqa: E402  (the same module, for its constants)
 from slidekit import FixtureState  # noqa: E402
 
 RUN_LIMIT = 1200
+RESET = TASK.score.__globals__["reset_credit"]  # the loaded task's own counter (``task`` imported above is a second copy)
 
 
-def window(opened=0.0, give=0.0, torn=False, speed=0.0):
+def window(opened=0.0, give=0.0, torn=False, speed=0.0, hand="on", fingers=0.13):
+    """hand: "on" (a gripper's tool point at the grip bar), "off" (far away) or "push" (at the sash's far edge)."""
     p = np.array(T.WINDOW.pos, dtype=float)
+    q = {"sash": -opened, "handle": -give}
+    bar = np.array([T.X + T.SASH_FRONT + T.SASH_D / 2 + T._FACE - T.STAND - T.BAR_X / 2,
+                    T.SASH_Y + T.HANDLE_Y - opened - give, T.TOP + T.SILL + T.HANDLE_Z])
+    tcp = {"on": bar, "off": np.array([0.15, -0.3, T.TOP + 0.2]), "push": bar + np.array([0.0, T.SASH_W, 0.0])}[hand]
+    hands = {"right_robot": {"tcp": tcp, "open": fingers}, "left_robot": {"tcp": np.array([0.15, 0.3, T.TOP + 0.2]), "open": 1.0}}
     return {"window": FixtureState(pos=p, quat_xyzw=np.array([0, 0, 0, 1.0]), lin_vel=np.zeros(3), ang_vel=np.zeros(3),
-                                   low=p, high=p, q={"sash": -opened, "handle": -give},
-                                   speed={"sash": -speed, "handle": 0.0}, broken={"sash": False, "handle": torn})}
+                                   low=p, high=p, q=q, speed={"sash": -speed, "handle": 0.0},
+                                   broken={"sash": False, "handle": torn}, hands=hands)}
+
+
+def trial(*states):
+    """Score a sequence of states from a fresh start (the score counts travel step by step); returns the last score."""
+    RESET()
+    out = None
+    for st in (window(), *states):
+        out = TASK.score(st)
+    return out
+
+
+def pulled(opened, give=0.006, **kw):
+    """A state pulled open to ``opened`` by the gripped handle (6 mm of give is about 5 N)."""
+    return window(opened, give=give, **kw)
 
 
 def test_the_task_file_loads():
@@ -42,33 +63,67 @@ def test_the_task_file_loads():
 
 @pytest.mark.parametrize("opened, expected", [(0.0, 0.0), (0.039, 0.0), (0.04, 0.25), (0.079, 0.25), (0.08, 0.5),
                                               (0.119, 0.5), (0.12, 0.75), (0.149, 0.75), (0.15, 1.0), (0.24, 1.0)])
-def test_the_score_follows_how_far_the_sash_is_open(opened, expected):
-    assert TASK.score(window(opened)) == expected
+def test_the_score_follows_how_far_the_sash_is_pulled_open(opened, expected):
+    assert trial(pulled(opened)) == expected
 
 
 def test_doing_nothing_scores_zero():
-    assert TASK.score(window()) == 0.0
+    assert trial(window()) == 0.0
 
 
 @pytest.mark.parametrize("opened", [0.0, 0.06, 0.15, 0.24])
 def test_a_torn_handle_scores_zero(opened):
-    assert TASK.score(window(opened, give=0.14, torn=True)) == 0.0
+    assert trial(pulled(opened, give=0.14, torn=True)) == 0.0
 
 
 def test_a_handle_under_strain_but_on_still_counts():
-    assert TASK.score(window(0.18, give=0.015)) == 1.0
+    assert trial(pulled(0.18, give=0.015)) == 1.0
+
+
+def test_pushing_the_sash_open_earns_nothing():
+    assert trial(window(0.20, hand="push", fingers=1.0)) == 0.0
+    assert trial(window(0.20, hand="push", fingers=0.0)) == 0.0  # closed fingers pushing the sash's edge
+
+
+def test_pushing_the_handle_without_gripping_it_earns_nothing():
+    assert trial(window(0.20, give=0.006, fingers=1.0)) == 0.0  # open fingers
+    assert trial(window(0.20, give=0.006, fingers=0.0)) == 0.0  # shut, empty fingers pushing the bar
+
+
+def test_a_gripped_handle_that_carries_no_pull_earns_nothing():
+    assert trial(window(0.20, give=0.0)) == 0.0  # e.g. the other hand pushes the sash while one holds the handle
+
+
+def test_only_the_pulled_travel_counts():
+    # pushed 10 cm, then pulled 4 cm by the handle: 4 cm count
+    assert trial(window(0.10, hand="push"), pulled(0.14)) == 0.25
+    # pulled 10 cm, then let go and it is shoved 10 cm more: 10 cm count
+    assert trial(pulled(0.10), window(0.20, hand="off", fingers=1.0)) == 0.5
+
+
+def test_closing_and_reopening_cannot_count_more_than_it_is_open():
+    assert trial(pulled(0.10), window(0.0, hand="off"), pulled(0.10)) == 0.5  # 20 cm pulled in all, but only 10 open
 
 
 def test_success_needs_the_goal_the_handle_and_a_still_sash():
-    assert TASK.success(window(0.18)) is True
-    assert TASK.success(window(0.18, speed=0.05)) is False
-    assert TASK.success(window(0.14)) is False
-    assert TASK.success(window(0.18, torn=True)) is False
+    RESET()
+    TASK.score(window())
+    assert TASK.success(pulled(0.18)) is True
+    assert TASK.success(pulled(0.18, speed=0.05)) is False
+    RESET()
+    TASK.score(window())
+    assert TASK.success(pulled(0.14)) is False
+    RESET()
+    TASK.score(window())
+    assert TASK.success(pulled(0.18, torn=True)) is False
 
 
 def test_distance_counts_down_to_the_goal():
+    trial(pulled(0.0))
     assert TASK.distance(window(0.0)) == pytest.approx(T.GOAL)
+    trial(pulled(0.10))
     assert TASK.distance(window(0.10)) == pytest.approx(T.GOAL - 0.10)
+    trial(pulled(0.20))
     assert TASK.distance(window(0.20)) == 0.0
 
 

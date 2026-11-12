@@ -57,6 +57,7 @@ class FixtureState(ObjectState):
     q: dict = field(default_factory=dict)  # slider name -> position (m) from rest
     speed: dict = field(default_factory=dict)  # slider name -> m/s
     broken: dict = field(default_factory=dict)  # slider name -> bool
+    hands: dict = field(default_factory=dict)  # arm -> {"tcp": world xyz between the fingertips, "open": 0 closed .. 1 open}
 
 
 def fixture(name, pos, boxes, sliders, color=(0.7, 0.7, 0.7)) -> Fixture:
@@ -230,7 +231,25 @@ def _state(env, spec: Fixture) -> FixtureState:
                 asset.write_joint_position_limit_to_sim_index(limits=limits, joint_ids=[i], warn_limit_violation=False)
     p = np.array(spec.pos)
     return FixtureState(pos=p, quat_xyzw=np.array([0, 0, 0, 1.0]), lin_vel=np.zeros(3), ang_vel=np.zeros(3), low=p,
-                        high=p, q=pos, speed=vel, broken={s.name: bool(_BROKEN.get(s.name)) for s in spec.sliders})
+                        high=p, q=pos, speed=vel, broken={s.name: bool(_BROKEN.get(s.name)) for s in spec.sliders},
+                        hands=_hands(base))
+
+
+def _hands(base) -> dict:
+    """Where each gripper's tool point is (world, like the task's positions) and how open its fingers are."""
+    from yam_arena.constants import FINGER_JOINTS, FINGER_OPEN
+    from yam_arena.runtime import tcp_world
+
+    origin = _np(base.scene.env_origins)[0]
+    out = {}
+    for arm in ("left_robot", "right_robot"):
+        if arm not in base.scene.keys():
+            continue
+        robot = base.scene[arm]
+        fingers = robot.find_joints(FINGER_JOINTS, preserve_order=True)[0]
+        opening = float(_np(robot.data.joint_pos)[0][fingers].mean() / FINGER_OPEN)
+        out[arm] = {"tcp": tcp_world(robot) - origin, "open": float(np.clip(opening, 0.0, 1.0))}
+    return out
 
 
 def _patch(scene) -> None:

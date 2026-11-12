@@ -2,6 +2,7 @@
 20 cm tall, fixed to the table. Its left half is a sliding sash that opens by sliding right, in front of the fixed
 right pane. The sash slides stiffly (heavily damped). A slim chrome D-handle stands out from the sash's right edge; it
 is mounted on a stiff spring that stands in for its fixings, and if it is pulled with more than about 14 N it tears off.
+Only travel made while a gripper is closed on the handle and pulling through it counts.
 
 Run it:  inspect-robots run --embodiment yam_arena -E task=task.py \\
            --instruction "The window is stiff and its handle is delicate. Grip the handle and slide the window open." \\
@@ -94,12 +95,25 @@ OBJECTS = [WINDOW]
 
 # -- scoring -----------------------------------------------------------------------------------------------------------
 
-GOAL = 0.15  # m the sash has to be open
+GOAL = 0.15  # m the sash has to be open, pulled by its handle
 LEVELS = ((GOAL, 1.0), (0.12, 0.75), (0.08, 0.5), (0.04, 0.25))
 STILL = 0.01  # m/s
+# The sash only counts as pulled open by its handle while a gripper is closed on the grip bar and the handle carries the
+# pull: its fixings have given at least GIVE_MIN in the opening direction (800 N/m x 1 mm = 0.8 N).
+GIVE_MIN = 0.001
+GRIP_OPENING = (0.05, 0.25)  # finger opening (0 shut .. 1 open) closed on the bar: about 0.13 (open around it: 0.38)
+NEAR = (0.01, 0.01, BAR_H / 2 + 0.005)  # the tool point within this of the grip bar's centre (x, y, z)
 
 _TRACE = os.environ.get("WINDOW_TRACE")  # optional: a file to log the window's state to every 10 steps, for debugging
 _steps = 0
+_last_open = 0.0
+_pulled = 0.0  # sash travel (opening) made while pulled by the gripped handle, summed over the trial
+
+
+def reset_credit() -> None:
+    """Start counting from scratch (one trial per process in the simulation; the tests call this)."""
+    global _last_open, _pulled
+    _last_open, _pulled = 0.0, 0.0
 
 
 def opened(objects) -> float:
@@ -107,40 +121,77 @@ def opened(objects) -> float:
     return -objects["window"].q["sash"]
 
 
+def give(objects) -> float:
+    """Metres the handle's fixings have given in the opening direction (it tears at TEAR_AT)."""
+    return -objects["window"].q["handle"]
+
+
 def torn(objects) -> bool:
     """The handle has torn off: it gave 18 mm (about 14 N) at some point in the trial."""
     return bool(objects["window"].broken["handle"])
 
 
-def _trace(objects) -> None:
+def bar_centre(objects) -> np.ndarray:
+    """World position of the grip bar's centre."""
+    w = objects["window"]
+    return np.array([X + SASH_FRONT + SASH_D / 2 + _FACE - STAND - BAR_X / 2,
+                     SASH_Y + HANDLE_Y + w.q["sash"] + w.q["handle"], TOP + SILL + HANDLE_Z])
+
+
+def gripped(objects) -> bool:
+    """A gripper is closed on the handle's grip bar: the bar between its fingers (not shut empty, not open)."""
+    bar = bar_centre(objects)
+    return any(GRIP_OPENING[0] <= h["open"] <= GRIP_OPENING[1] and np.all(np.abs(np.asarray(h["tcp"]) - bar) <= NEAR)
+               for h in objects["window"].hands.values())
+
+
+def pulled_by_handle(objects) -> bool:
+    """The sash is being pulled through its handle: gripped, and the handle carrying the pull."""
+    return gripped(objects) and give(objects) >= GIVE_MIN
+
+
+def credited(objects) -> float:
+    """Metres of opening that count: the travel made while pulled by the handle (never more than how far it is open)."""
+    global _last_open, _pulled
+    d = opened(objects)
+    if d > _last_open and pulled_by_handle(objects):
+        _pulled += d - _last_open
+    _last_open = d
+    return max(0.0, min(_pulled, d))
+
+
+def _trace(objects, c) -> None:
     global _steps
     _steps += 1
     if _TRACE and _steps % 10 == 0:
         w = objects["window"]
         with open(_TRACE, "a") as f:
-            f.write(json.dumps({"call": _steps, "opened_cm": round(opened(objects) * 100, 2),
-                                "give_mm": round(-w.q["handle"] * 1000, 1), "torn": torn(objects),
+            f.write(json.dumps({"call": _steps, "opened_cm": round(opened(objects) * 100, 2), "credited_cm": round(c * 100, 2),
+                                "give_mm": round(give(objects) * 1000, 1), "gripped": gripped(objects),
+                                "hands": {a: [round(float(v), 3) for v in (*(np.asarray(h["tcp"]) - bar_centre(objects)), h["open"])]
+                                          for a, h in w.hands.items()}, "torn": torn(objects),
                                 "speed_cm_s": round(-w.speed["sash"] * 100, 2)}) + "\n")
 
 
 def score(objects):
-    """0 if the handle has torn off. Otherwise 1.0 with the sash open 15 cm or more, 0.75 from 12 cm, 0.5 from 8 cm,
-    0.25 from 4 cm, 0 below."""
-    _trace(objects)
+    """0 if the handle has torn off. Otherwise, by how far the sash has been pulled open by its handle: 1.0 from 15 cm,
+    0.75 from 12 cm, 0.5 from 8 cm, 0.25 from 4 cm, 0 below. Travel made any other way (pushing the sash, pushing the
+    handle, letting it coast) doesn't count."""
+    c = credited(objects)
+    _trace(objects, c)
     if torn(objects):
         return 0.0
-    d = opened(objects)
-    return next((s for at, s in LEVELS if d >= at), 0.0)
+    return next((s for at, s in LEVELS if c >= at), 0.0)
 
 
 def success(objects):
-    """Open 15 cm or more with the handle on, and the sash still (held for SUCCESS_HOLD_S)."""
+    """Pulled 15 cm or more open by its handle, the handle on, and the sash still (held for SUCCESS_HOLD_S)."""
     return bool(score(objects) == 1.0 and abs(objects["window"].speed["sash"]) < STILL)
 
 
 def distance(objects):
-    """Metres the sash still has to slide to be 15 cm open (0 once it is)."""
-    return float(max(0.0, GOAL - opened(objects)))
+    """Metres the sash still has to be pulled open by its handle to reach 15 cm (0 once it has)."""
+    return float(max(0.0, GOAL - max(0.0, min(_pulled, opened(objects)))))
 
 
 # -- scripted demo -----------------------------------------------------------------------------------------------------
