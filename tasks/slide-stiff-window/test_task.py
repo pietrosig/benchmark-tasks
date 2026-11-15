@@ -132,10 +132,15 @@ def test_the_tear_force_is_about_14_newtons():
     assert T.HANDLE.breaks_at == T.TEAR_AT and T.HANDLE.low < -T.TEAR_AT  # it can tear before it hits its stop
 
 
-def test_a_slow_pull_is_well_under_the_tear_force_and_a_fast_one_over_it():
-    slow = T.SASH_DAMPING * (T.OPEN + 0.012) / T.PULL_S  # the demo's pull, about 2 cm/s
-    fast = T.SASH_DAMPING * 0.10
-    assert slow < 0.5 * T.HANDLE_K * T.TEAR_AT < T.HANDLE_K * T.TEAR_AT < fast
+def test_the_sash_can_be_freed_and_slid_without_tearing_the_handle():
+    tear = T.HANDLE_K * T.TEAR_AT
+    assert T.SLIDING_N < T.BREAKAWAY_N < tear  # a pull between 10 and 14 N frees it; sliding needs only 7 N
+    assert tear - T.BREAKAWAY_N >= 4.0  # a usable margin between freeing the sash and tearing the handle
+    assert T.SLIDING_N / T.HANDLE_K >= T.GIVE_MIN  # while it slides, the handle carries the pull (counts as pulled)
+
+
+def test_the_overpull_variant_runs_into_the_end_stop():
+    assert T.SASH_TRAVEL < 0.45
 
 
 def test_the_closed_sash_fills_the_left_half_and_can_open_past_the_goal():

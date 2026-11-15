@@ -1,12 +1,13 @@
 """On the station table, 30 cm out from the arm bases and facing them: a small white sliding window, 52 cm wide and
 20 cm tall, fixed to the table. Its left half is a sliding sash that opens by sliding right, in front of the fixed
-right pane. The sash slides stiffly (heavily damped). A slim chrome D-handle stands out from the sash's right edge; it
+right pane. The sash is stiff in its track: it sticks until pulled with 10 N, then drags with 7 N while it slides
+(dry friction, the same at any speed). A slim chrome D-handle stands out from the sash's right edge; it
 is mounted on a stiff spring that stands in for its fixings, and if it is pulled with more than about 14 N it tears off.
 Only travel made while a gripper is closed on the handle and pulling through it counts.
 
 Run it:  inspect-robots run --embodiment yam_arena -E task=task.py \\
            --instruction "The window is stiff and its handle is delicate. Grip the handle and slide the window open." \\
-           --scorer task_score -E object_jitter=0 -E control_hz=20 -E cam_width=320 -E cam_height=176 ...
+           --scorer task_score -E object_jitter=0 -E control_hz=20 -E cam_width=640 -E cam_height=352 ...
 """
 
 from __future__ import annotations
@@ -62,7 +63,9 @@ SASH_D = 0.012  # its depth (x)
 SASH_FRONT = -0.013  # its front face, relative to the frame's centre plane
 SASH_Y = Y_L - SASH_W / 2  # its centre when closed
 SASH_TRAVEL = 0.24
-SASH_DAMPING = 300.0  # N s/m: pulled at 2 cm/s it drags with 6 N, at 10 cm/s with 30 N
+BREAKAWAY_N = 10.0  # the pull that frees the sash from rest
+SLIDING_N = 7.0  # the drag while it slides, at any speed
+HOLD_K = 3000.0  # N/m: the track's compliance before the sash breaks free (3 mm at 10 N)
 SASH_MASS = 0.5
 
 SASH = Slider("sash", (SASH_FRONT + SASH_D / 2, SASH_Y, SILL), "Y", (
@@ -71,7 +74,8 @@ SASH = Slider("sash", (SASH_FRONT + SASH_D / 2, SASH_Y, SILL), "Y", (
     ((0, 0, M / 2), (SASH_D, SASH_W - 2 * M, M), WHITE),
     ((0, 0, H - M / 2), (SASH_D, SASH_W - 2 * M, M), WHITE),
     ((0, 0, H / 2), (0.003, SASH_W - 2 * M, H - 2 * M), GLASS),
-), low=-SASH_TRAVEL, high=0.0, damping=SASH_DAMPING, friction=0.0, mass=SASH_MASS)
+), low=-SASH_TRAVEL, high=0.0, stiffness=HOLD_K, damping=3.0, friction=0.0, mass=SASH_MASS,
+    binding=(BREAKAWAY_N, SLIDING_N))
 
 # -- the handle: a D-handle on the sash's right stile, on a spring that stands in for its fixings ------------------------
 
@@ -196,8 +200,9 @@ def distance(objects):
 
 # -- scripted demo -----------------------------------------------------------------------------------------------------
 
-PULL_S = 10.0  # the pull's length: about 2 cm/s, so the handle carries about 6 N
-OPEN = 0.20  # how far the demo opens the sash (the goal is 15 cm)
+PULL_S = float(os.environ.get("PULL_S", 10.0))  # the pull's length: about 2 cm/s
+OPEN = float(os.environ.get("OPEN", 0.23))  # how far the demo pulls (the goal is 15 cm; the sash stops at 24 cm). OPEN=0.45
+# yanks on 21 cm past the end stop, which tears the handle off: the failure the task guards against
 MOVE = 0.08  # m/s, moving in free space
 CORNER = 0.025  # corner radius on the way in (m)
 TURN = 0.02  # corner radius from the pull into the move away
@@ -235,7 +240,7 @@ def _play(path, speed, finger, label, ramp=0.8) -> list[Waypoint]:
 
 
 def demo():
-    """The right arm reaches round to the handle from the room side, grips it, pulls the sash 20 cm open slowly in one
+    """The right arm reaches round to the handle from the room side, grips it, pulls the sash 23 cm open (just short of its stop) in one
     continuous motion, lets go while still moving and draws back."""
     gx = X + SASH_FRONT + SASH_D / 2 + _FACE - STAND - BAR_X / 2 - 0.003  # the grip bar's centre, 3 mm short
     y = SASH_Y + HANDLE_Y

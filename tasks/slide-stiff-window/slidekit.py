@@ -41,6 +41,8 @@ class Slider:
     friction: float = 0.0
     mass: float = 0.1  # kg
     breaks_at: float | None = None  # |q| (m) at which it fails
+    binding: tuple | None = None  # (breakaway N, sliding N): dry friction. The slider is held by its spring (``stiffness``)
+    # to an anchor; pulled past the breakaway force the anchor slips, trailing it at the sliding force, until it stops
     broken_low: float | None = None  # its lower limit after failing
     limp_damping: float = 0.5
 
@@ -67,6 +69,8 @@ def fixture(name, pos, boxes, sliders, color=(0.7, 0.7, 0.7)) -> Fixture:
 
 
 _SPECS: dict = {}
+_ANCHOR: dict = {}
+_SLIPPING: dict = {}
 _BROKEN: dict = {}
 _STARTED: set = set()
 
@@ -216,10 +220,28 @@ def _state(env, spec: Fixture) -> FixtureState:
         _STARTED.add(spec.name)
         asset.write_joint_state_to_sim_index(position=zeros, velocity=zeros, joint_ids=ids)
         q[ids], qd[ids] = 0.0, 0.0
-    asset.set_joint_position_target_index(target=zeros, joint_ids=ids)  # the springs pull towards rest
-    asset.set_joint_velocity_target_index(target=zeros, joint_ids=ids)
     pos = {s.name: float(q[names.index(_joint(s))]) for s in spec.sliders}
     vel = {s.name: float(qd[names.index(_joint(s))]) for s in spec.sliders}
+    targets = []
+    for s in spec.sliders:  # the springs pull towards rest, or, for a binding slider, towards its anchor
+        if s.binding is None or _BROKEN.get(s.name):
+            targets.append(0.0)
+            continue
+        brk, slide = s.binding
+        anchor = _ANCHOR.get(s.name, 0.0)
+        d = pos[s.name] - anchor  # stretch of the holding spring: the force through it is stiffness x d
+        if not _SLIPPING.get(s.name) and abs(d) * s.stiffness > brk:
+            _SLIPPING[s.name] = True  # broken free
+        if _SLIPPING.get(s.name):
+            if abs(d) * s.stiffness > slide:
+                anchor = pos[s.name] - np.sign(d) * slide / s.stiffness  # sliding: the friction holds back at ``slide``
+            elif abs(vel[s.name]) < 0.003:
+                _SLIPPING[s.name] = False  # stopped: stuck again until pulled past the breakaway force
+        _ANCHOR[s.name] = anchor
+        targets.append(anchor)
+    tt = torch.tensor([targets], device=base.device, dtype=torch.float32)
+    asset.set_joint_position_target_index(target=tt, joint_ids=ids)
+    asset.set_joint_velocity_target_index(target=zeros, joint_ids=ids)
     for s in spec.sliders:
         if s.breaks_at is not None and abs(pos[s.name]) >= s.breaks_at and not _BROKEN.get(s.name):
             _BROKEN[s.name] = True
