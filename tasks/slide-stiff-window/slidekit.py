@@ -41,8 +41,8 @@ class Slider:
     friction: float = 0.0
     mass: float = 0.1  # kg
     breaks_at: float | None = None  # |q| (m) at which it fails
-    binding: tuple | None = None  # (breakaway N, sliding N): dry friction. The slider is held by its spring (``stiffness``)
-    # to an anchor; pulled past the breakaway force the anchor slips, trailing it at the sliding force, until it stops
+    binding: tuple | None = None  # (static N, dynamic N): dry joint friction, applied by PhysX every physics step: the
+    # slider stays put until pushed or pulled along its axis with more than the static effort, then drags with the dynamic one
     broken_low: float | None = None  # its lower limit after failing
     limp_damping: float = 0.5
 
@@ -60,6 +60,8 @@ class FixtureState(ObjectState):
     speed: dict = field(default_factory=dict)  # slider name -> m/s
     broken: dict = field(default_factory=dict)  # slider name -> bool
     hands: dict = field(default_factory=dict)  # arm -> {"tcp": world xyz between the fingertips, "open": 0 closed .. 1 open}
+    drive: dict = field(default_factory=dict)  # slider name -> force (N) its spring/friction drive puts on it, along its axis
+    accel: dict = field(default_factory=dict)  # slider name -> acceleration (m/s^2) over the last control step
 
 
 def fixture(name, pos, boxes, sliders, color=(0.7, 0.7, 0.7)) -> Fixture:
@@ -69,8 +71,9 @@ def fixture(name, pos, boxes, sliders, color=(0.7, 0.7, 0.7)) -> Fixture:
 
 
 _SPECS: dict = {}
-_ANCHOR: dict = {}
-_SLIPPING: dict = {}
+_STEP: dict = {}
+_VPREV: dict = {}
+_ACCEL: dict = {}
 _BROKEN: dict = {}
 _STARTED: set = set()
 
@@ -193,8 +196,10 @@ def _arena_object(spec: Fixture):
 
     class FixtureObject(Object):
         def _generate_articulation_cfg(self):
-            actuators = {s.name: ImplicitActuatorCfg(joint_names_expr=[_joint(s)], stiffness=s.stiffness,
-                                                     damping=s.damping, friction=s.friction) for s in spec.sliders}
+            actuators = {s.name: ImplicitActuatorCfg(
+                joint_names_expr=[_joint(s)], stiffness=s.stiffness, damping=s.damping,
+                friction=s.binding[0] if s.binding else s.friction,
+                dynamic_friction=s.binding[1] if s.binding else None) for s in spec.sliders}
             return self._add_initial_pose_to_cfg(ArticulationCfg(prim_path=self.prim_path, spawn=self.spawner_cfg,
                                                                  actuators=actuators))
 
@@ -222,23 +227,25 @@ def _state(env, spec: Fixture) -> FixtureState:
         q[ids], qd[ids] = 0.0, 0.0
     pos = {s.name: float(q[names.index(_joint(s))]) for s in spec.sliders}
     vel = {s.name: float(qd[names.index(_joint(s))]) for s in spec.sliders}
-    targets = []
-    for s in spec.sliders:  # the springs pull towards rest, or, for a binding slider, towards its anchor
-        if s.binding is None or _BROKEN.get(s.name):
-            targets.append(0.0)
-            continue
-        brk, slide = s.binding
-        anchor = _ANCHOR.get(s.name, 0.0)
-        d = pos[s.name] - anchor  # stretch of the holding spring: the force through it is stiffness x d
-        if not _SLIPPING.get(s.name) and abs(d) * s.stiffness > brk:
-            _SLIPPING[s.name] = True  # broken free
-        if _SLIPPING.get(s.name):
-            if abs(d) * s.stiffness > slide:
-                anchor = pos[s.name] - np.sign(d) * slide / s.stiffness  # sliding: the friction holds back at ``slide``
-            elif abs(vel[s.name]) < 0.003:
-                _SLIPPING[s.name] = False  # stopped: stuck again until pulled past the breakaway force
-        _ANCHOR[s.name] = anchor
-        targets.append(anchor)
+    # The force each slider's drive and friction put on it, as far as it is known: its spring and damping, plus, for a
+    # binding slider that is sliding, its dynamic friction against the motion (while it sticks, its static friction
+    # takes whatever is needed, up to the static effort, so it is not known and is reported as 0).
+    step_dt = float(getattr(base, "step_dt", 0.05))
+    step = _step_key(base, step_dt)
+    drive = {}
+    for s in spec.sliders:
+        f = s.stiffness * (0.0 - pos[s.name]) - s.damping * vel[s.name]
+        if s.binding is not None and abs(vel[s.name]) > 0.001:
+            f -= np.sign(vel[s.name]) * s.binding[1]
+        drive[s.name] = float(f)
+    targets = [0.0 for _ in spec.sliders]
+    if _STEP.get(spec.name) != step:
+        dt_step = (step - _STEP[spec.name]) * step_dt if spec.name in _STEP else None
+        for s in spec.sliders:
+            if dt_step:
+                _ACCEL[s.name] = (vel[s.name] - _VPREV.get(s.name, vel[s.name])) / dt_step
+            _VPREV[s.name] = vel[s.name]
+        _STEP[spec.name] = step
     tt = torch.tensor([targets], device=base.device, dtype=torch.float32)
     asset.set_joint_position_target_index(target=tt, joint_ids=ids)
     asset.set_joint_velocity_target_index(target=zeros, joint_ids=ids)
@@ -254,7 +261,18 @@ def _state(env, spec: Fixture) -> FixtureState:
     p = np.array(spec.pos)
     return FixtureState(pos=p, quat_xyzw=np.array([0, 0, 0, 1.0]), lin_vel=np.zeros(3), ang_vel=np.zeros(3), low=p,
                         high=p, q=pos, speed=vel, broken={s.name: bool(_BROKEN.get(s.name)) for s in spec.sliders},
-                        hands=_hands(base))
+                        hands=_hands(base), drive=drive, accel={s.name: _ACCEL.get(s.name, 0.0) for s in spec.sliders})
+
+
+def _step_key(base, step_dt: float) -> int:
+    """A number that goes up by one each control step: the env's step counter, or else the simulated time over the step."""
+    c = getattr(base, "common_step_counter", None)
+    if c is not None:
+        return int(c)
+    try:
+        return int(round(float(base.sim.current_time) / step_dt))
+    except Exception:  # noqa: BLE001
+        return int(round(float(getattr(base.sim, "_current_time", 0.0)) / step_dt))
 
 
 def _hands(base) -> dict:

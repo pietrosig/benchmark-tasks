@@ -65,16 +65,17 @@ SASH_Y = Y_L - SASH_W / 2  # its centre when closed
 SASH_TRAVEL = 0.24
 BREAKAWAY_N = 10.0  # the pull that frees the sash from rest
 SLIDING_N = 7.0  # the drag while it slides, at any speed
-HOLD_K = 3000.0  # N/m: the track's compliance before the sash breaks free (3 mm at 10 N)
 SASH_MASS = 0.5
+GAP_Z = 0.002  # the sash clears the sill and the head by 2 mm: only its runners' friction (the pad) drags on it
 
-SASH = Slider("sash", (SASH_FRONT + SASH_D / 2, SASH_Y, SILL), "Y", (
-    ((0, SASH_W / 2 - M / 2, H / 2), (SASH_D, M, H), WHITE),
-    ((0, -(SASH_W / 2 - M / 2), H / 2), (SASH_D, M, H), WHITE),
+_HS = H - 2 * GAP_Z  # the sash's height
+SASH = Slider("sash", (SASH_FRONT + SASH_D / 2, SASH_Y, SILL + GAP_Z), "Y", (
+    ((0, SASH_W / 2 - M / 2, _HS / 2), (SASH_D, M, _HS), WHITE),
+    ((0, -(SASH_W / 2 - M / 2), _HS / 2), (SASH_D, M, _HS), WHITE),
     ((0, 0, M / 2), (SASH_D, SASH_W - 2 * M, M), WHITE),
-    ((0, 0, H - M / 2), (SASH_D, SASH_W - 2 * M, M), WHITE),
-    ((0, 0, H / 2), (0.003, SASH_W - 2 * M, H - 2 * M), GLASS),
-), low=-SASH_TRAVEL, high=0.0, stiffness=HOLD_K, damping=3.0, friction=0.0, mass=SASH_MASS,
+    ((0, 0, _HS - M / 2), (SASH_D, SASH_W - 2 * M, M), WHITE),
+    ((0, 0, _HS / 2), (0.003, SASH_W - 2 * M, _HS - 2 * M), GLASS),
+), low=-SASH_TRAVEL, high=0.0, stiffness=0.0, damping=1.0, friction=0.0, mass=SASH_MASS,
     binding=(BREAKAWAY_N, SLIDING_N))
 
 # -- the handle: a D-handle on the sash's right stile, on a spring that stands in for its fixings ------------------------
@@ -139,7 +140,24 @@ def bar_centre(objects) -> np.ndarray:
     """World position of the grip bar's centre."""
     w = objects["window"]
     return np.array([X + SASH_FRONT + SASH_D / 2 + _FACE - STAND - BAR_X / 2,
-                     SASH_Y + HANDLE_Y + w.q["sash"] + w.q["handle"], TOP + SILL + HANDLE_Z])
+                     SASH_Y + HANDLE_Y + w.q["sash"] + w.q["handle"], TOP + SILL + GAP_Z + HANDLE_Z])
+
+
+TOUCH = 0.02  # a gripper this close to the window's sash, glass or frame counts as touching it
+
+
+def _at_bar(objects, h) -> bool:
+    bar = bar_centre(objects)
+    return GRIP_OPENING[0] <= h["open"] <= GRIP_OPENING[1] and bool(np.all(np.abs(np.asarray(h["tcp"]) - bar) <= NEAR))
+
+
+def other_gripper_on_window(objects) -> bool:
+    """A gripper other than the one closed on the handle is at the window (within 2 cm of the sash, its glass or the
+    frame, on the room side or inside the frame): touching it, even without pushing."""
+    lo = np.array([X + SASH_FRONT - TOUCH, Y_R - JAMB - TOUCH, TOP])
+    hi = np.array([X + DEPTH / 2 + TOUCH, Y_L + JAMB + TOUCH, TOP + SILL + H + HEAD + TOUCH])
+    return any(not _at_bar(objects, h) and bool(np.all((np.asarray(h["tcp"]) >= lo) & (np.asarray(h["tcp"]) <= hi)))
+               for h in objects["window"].hands.values())
 
 
 def gripped(objects) -> bool:
@@ -149,17 +167,38 @@ def gripped(objects) -> bool:
                for h in objects["window"].hands.values())
 
 
+PUSH_N = 2.0  # an outside force helping the sash open by more than this means something other than the handle is pushing it
+MOVING_MASS = SASH_MASS + 0.03  # the sash and its handle
+
+
+def other_push(objects) -> float:
+    """The force (N) something other than the handle puts on the sash in the opening direction: another gripper, an arm,
+    anything. From the sash's force balance: its mass times its acceleration, less the track's friction (the joint's drive)
+    and the handle's pull (its fixings' spring). Positive helps it open; about 0 when only the handle pulls it."""
+    w = objects["window"]
+    handle_pull = HANDLE_K * w.q["handle"] + 5.0 * w.speed["handle"]  # the handle's fixings pull the sash towards the handle
+    outside = MOVING_MASS * w.accel["sash"] - w.drive["sash"] - handle_pull  # along the joint: opening is negative
+    return -outside
+
+
 def pulled_by_handle(objects) -> bool:
-    """The sash is being pulled through its handle: gripped, and the handle carrying the pull."""
-    return gripped(objects) and give(objects) >= GIVE_MIN
+    """The sash is being pulled through its handle and by nothing else: a gripper closed on the grip bar, the handle
+    carrying the pull, and nothing else pushing the sash open."""
+    return (gripped(objects) and give(objects) >= GIVE_MIN and other_push(objects) <= PUSH_N
+            and not other_gripper_on_window(objects))
 
 
 def credited(objects) -> float:
-    """Metres of opening that count: the travel made while pulled by the handle (never more than how far it is open)."""
+    """Metres of opening that count: a running total of the opening made while pulled by the handle alone, less every bit
+    of closing (however it happens), so pulling a little, closing and pulling again earns nothing extra. Never more than
+    how far the sash is open."""
     global _last_open, _pulled
     d = opened(objects)
-    if d > _last_open and pulled_by_handle(objects):
-        _pulled += d - _last_open
+    if d > _last_open:
+        if pulled_by_handle(objects):
+            _pulled += d - _last_open
+    elif d < _last_open:
+        _pulled = max(0.0, _pulled - (_last_open - d))
     _last_open = d
     return max(0.0, min(_pulled, d))
 
@@ -172,6 +211,7 @@ def _trace(objects, c) -> None:
         with open(_TRACE, "a") as f:
             f.write(json.dumps({"call": _steps, "opened_cm": round(opened(objects) * 100, 2), "credited_cm": round(c * 100, 2),
                                 "give_mm": round(give(objects) * 1000, 1), "gripped": gripped(objects),
+                                "other_push_n": round(other_push(objects), 2),
                                 "hands": {a: [round(float(v), 3) for v in (*(np.asarray(h["tcp"]) - bar_centre(objects)), h["open"])]
                                           for a, h in w.hands.items()}, "torn": torn(objects),
                                 "speed_cm_s": round(-w.speed["sash"] * 100, 2)}) + "\n")
@@ -244,7 +284,7 @@ def demo():
     continuous motion, lets go while still moving and draws back."""
     gx = X + SASH_FRONT + SASH_D / 2 + _FACE - STAND - BAR_X / 2 - 0.003  # the grip bar's centre, 3 mm short
     y = SASH_Y + HANDLE_Y
-    z = TOP + SILL + HANDLE_Z
+    z = TOP + SILL + GAP_Z + HANDLE_Z
     end = y - OPEN - 0.012
     high = (0.15, y - 0.10, z + 0.10)  # room side of the frame and above the handle: the fingers never cross the frame
     before, grip, pulled, away = (gx - 0.07, y, z), (gx, y, z), (gx, end, z), (gx - 0.09, end, z)
