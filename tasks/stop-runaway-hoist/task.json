@@ -17,5 +17,5 @@
   "reset_notes": "Release the pendant's stop (twist clockwise), raise the toolbox to 15 cm above the cap, let the pendant hang still. The down button is wedged in (the jam); the hoist starts at the start signal. Safety: the lower limit switch stops the hoist at contact with the cap (scored 0); rope, swivel and beam rated 5x the load, with a backup sling; an observer outside the load's footprint holds a second stop wired in series and stops the trial if an arm goes under the load; nobody reaches under it.",
   "fidelity": "Real-size toolbox, bottle, mat and pendant, in the real layout. The hoist is a motor lowering the toolbox at a constant 1.5 cm/s that brakes the moment the emergency stop latches; the toolbox doesn't swing on its rope. The pendant swings as a rigid pendulum on a 75 cm cable (no twist or slack). The stop is a spring plunger latching at 3.5 mm under 20 N, like a real 22 mm mushroom stop. The bottle's liquid isn't simulated: any contact with it is the failure.",
   "scores": "Dream-1 run: 0.0 (it never touched the pendant; the toolbox came down on the bottle 10 s in); demo: 1.0",
-  "media": ""
+  "media": "M-KLFXU2"
 }
