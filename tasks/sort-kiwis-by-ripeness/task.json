@@ -1,0 +1,22 @@
+{
+  "title": "Sort kiwis by squeezing them gently: the ripe ones into the bowl, the hard ones into the paper bag",
+  "category": "Societal relatability",
+  "keywords": [
+    "ripeness",
+    "squeeze test",
+    "gentle grip",
+    "force control",
+    "haptic sorting",
+    "soft produce",
+    "bimanual"
+  ],
+  "instruction": "Four kiwis lie in the two trays: two are ripe and two are still hard, and they look the same. Squeeze each one gently to feel which it is, without crushing it. Put the ripe kiwis in the white bowl and the hard ones in the paper bag.",
+  "context": "Squeezing fruit to find the ripe ones is something almost everyone does at the shop or at home, and store staff do it when they pick produce for online orders. Kiwis barely change colour as they ripen (a ripe one gives slightly to gentle pressure), so only a squeeze tells them apart: the robot has to feel about 1 mm of extra give at a few newtons, and must not crush the ripe ones.",
+  "setup": "Positions in cm from the midpoint between the arm bases (x forward, y to the robot's left), heights above the table. Two pocket trays of white 5 mm foam board taped to the table, one each side: a 20.4 x 6.8 cm base with 1 cm walls forming two pockets 7.6 cm long (x) and 6 cm wide, centred at (22, 15) and (32, 15) on the left and (22, -15) and (32, -15) on the right. In each pocket lies one green (Hayward) kiwi, about 68 x 52 mm and 100 g, long axis forward. Two are ripe (give slightly to gentle pressure) and two hard (no give); which pockets hold the ripe ones is drawn before each trial (6 layouts, TASK_SEED 0-5), and they look alike. A white ceramic bowl, 19 cm across the rim, 9 cm across the foot, 6.5 cm deep, stands centred at (36, 0), fixed with putty. A brown kraft paper lunch bag (15 x 9 cm base), its top rolled down to stand 10 cm tall, open side up, its inside spanning x 12.5-21.5 and y -7.5 to 7.5, taped down. Both arms start at the ready pose, grippers open.",
+  "scoring": "0.25 per kiwi. +0.25 for each kiwi at rest in its own container and let go (no gripper touching it): ripe kiwis in the bowl (centre within 8 cm of its axis, below the rim), hard ones in the bag (inside, below its top). -0.25 for each kiwi at rest in the other container. 0 for a kiwi anywhere else (in its tray, on the table or floor, held, rolling). A ripe kiwi crushed at any time scores 0 even in the bowl: squeezed over 6 mm narrower than its own width (the gripper's logged finger gap against the kiwi's caliper width), or skin split or juice showing; in simulation, pressed with over 15 N by any robot part. Total never below 0: all four in one container, or doing nothing, scores 0; 1.0 = all four right.",
+  "run_limit": "2,400 steps (2 minutes at 20 Hz)",
+  "reset_notes": "Take the kiwis out, re-check each by hand (a ripe one gives, a hard one doesn't), draw a layout (roll a die: TASK_SEED = roll - 1, layouts listed in the README) and lay the two ripe and two hard kiwis in the pockets it names. Ripe kiwis keep about 5 days in the fridge; replace any that soften past 'gives slightly' or were crushed. About 1 minute.",
+  "fidelity": "Kiwis are rigid 68 x 52 mm, 100 g ellipsoids with PhysX compliant contacts: ripe 5,000 N/m per contact (about 2 mm of give between two pads at 5 N), hard 100,000 N/m. Crushing is a rule: a ripe kiwi pressed with over 15 N by any robot part (a 6 mm squeeze on this model) counts as crushed. Real kiwis aren't linear springs and their give varies. The trays, bowl and bag are fixed rigid shapes; the bag's paper is rigid.",
+  "scores": "Dream-1 run (TASK_SEED 2): 0.0. Both arms rose and hovered above their own side of the table; neither reached a kiwi (the right gripper came within about 13 cm of the right near kiwi at 33 s and closed empty from 42 s) and no kiwi moved. Demo (TASK_SEED 2): 1.0.",
+  "media": "M-DQ9K5S"
+}
