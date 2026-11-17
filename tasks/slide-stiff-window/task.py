@@ -22,7 +22,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import numpy as np  # noqa: E402
 from slidekit import Slider, fixture  # noqa: E402  (importing slidekit hooks yam_arena so the window is simulated)
-from yam_arena.constants import FINGER_CLOSED  # noqa: E402
+from yam_arena.constants import FINGER_CLOSED, FINGER_OPEN  # noqa: E402
 from yam_arena.demo import Waypoint  # noqa: E402
 from yam_arena.task_file import TABLE_TOP  # noqa: E402
 
@@ -143,7 +143,7 @@ def bar_centre(objects) -> np.ndarray:
                      SASH_Y + HANDLE_Y + w.q["sash"] + w.q["handle"], TOP + SILL + GAP_Z + HANDLE_Z])
 
 
-TOUCH = 0.02  # a gripper this close to the window's sash, glass or frame counts as touching it
+GRIP_LINKS = ("gripper", "tip_left", "tip_right")  # the YAM's gripper body and its two fingers
 
 
 def _at_bar(objects, h) -> bool:
@@ -151,20 +151,31 @@ def _at_bar(objects, h) -> bool:
     return GRIP_OPENING[0] <= h["open"] <= GRIP_OPENING[1] and bool(np.all(np.abs(np.asarray(h["tcp"]) - bar) <= NEAR))
 
 
-def other_gripper_on_window(objects) -> bool:
-    """A gripper other than the one closed on the handle is at the window (within 2 cm of the sash, its glass or the
-    frame, on the room side or inside the frame): touching it, even without pushing."""
-    lo = np.array([X + SASH_FRONT - TOUCH, Y_R - JAMB - TOUCH, TOP])
-    hi = np.array([X + DEPTH / 2 + TOUCH, Y_L + JAMB + TOUCH, TOP + SILL + H + HEAD + TOUCH])
-    return any(not _at_bar(objects, h) and bool(np.all((np.asarray(h["tcp"]) >= lo) & (np.asarray(h["tcp"]) <= hi)))
-               for h in objects["window"].hands.values())
+def gripping_arms(objects) -> list[str]:
+    """The arms whose gripper is closed on the handle's grip bar."""
+    return [a for a, h in objects["window"].hands.items() if _at_bar(objects, h)]
 
 
 def gripped(objects) -> bool:
     """A gripper is closed on the handle's grip bar: the bar between its fingers (not shut empty, not open)."""
-    bar = bar_centre(objects)
-    return any(GRIP_OPENING[0] <= h["open"] <= GRIP_OPENING[1] and np.all(np.abs(np.asarray(h["tcp"]) - bar) <= NEAR)
-               for h in objects["window"].hands.values())
+    return bool(gripping_arms(objects))
+
+
+def other_contact(objects) -> list[str] | None:
+    """Robot parts touching the window other than the gripping hand on the handle, as "arm/link", from PhysX's contacts
+    between every link of both arms and the window's three bodies: any link on the frame (with the fixed pane) or on the
+    sash (its frame and glass), and any link on the handle other than the gripper and fingers of an arm closed on the
+    grip bar. None if the contacts are not known (then nothing is credited)."""
+    c = objects["window"].contacts
+    if c is None:
+        return None
+    holding = set(gripping_arms(objects))
+    out = list(c.get("body", ())) + list(c.get("sash", ()))
+    for link in c.get("handle", ()):
+        arm, name = link.split("/", 1)
+        if not (arm in holding and name in GRIP_LINKS):
+            out.append(link)
+    return out
 
 
 PUSH_N = 2.0  # an outside force helping the sash open by more than this means something other than the handle is pushing it
@@ -183,9 +194,9 @@ def other_push(objects) -> float:
 
 def pulled_by_handle(objects) -> bool:
     """The sash is being pulled through its handle and by nothing else: a gripper closed on the grip bar, the handle
-    carrying the pull, and nothing else pushing the sash open."""
-    return (gripped(objects) and give(objects) >= GIVE_MIN and other_push(objects) <= PUSH_N
-            and not other_gripper_on_window(objects))
+    carrying the pull, no other part of the robot touching the window, and nothing else pushing the sash open."""
+    return (gripped(objects) and give(objects) >= GIVE_MIN and other_contact(objects) == []
+            and other_push(objects) <= PUSH_N)
 
 
 def credited(objects) -> float:
@@ -211,7 +222,8 @@ def _trace(objects, c) -> None:
         with open(_TRACE, "a") as f:
             f.write(json.dumps({"call": _steps, "opened_cm": round(opened(objects) * 100, 2), "credited_cm": round(c * 100, 2),
                                 "give_mm": round(give(objects) * 1000, 1), "gripped": gripped(objects),
-                                "other_push_n": round(other_push(objects), 2),
+                                "other_push_n": round(other_push(objects), 2), "other_contact": other_contact(objects),
+                                "contacts": w.contacts,
                                 "hands": {a: [round(float(v), 3) for v in (*(np.asarray(h["tcp"]) - bar_centre(objects)), h["open"])]
                                           for a, h in w.hands.items()}, "torn": torn(objects),
                                 "speed_cm_s": round(-w.speed["sash"] * 100, 2)}) + "\n")
@@ -241,6 +253,8 @@ def distance(objects):
 # -- scripted demo -----------------------------------------------------------------------------------------------------
 
 PULL_S = float(os.environ.get("PULL_S", 10.0))  # the pull's length: about 2 cm/s
+TOUCH = os.environ.get("TOUCH", "0") == "1"  # TOUCH=1: the demo with the left gripper resting on the frame (scores 0)
+PAD_REACH = -FINGER_OPEN + 0.0  # an open finger's pad, from the tool point along the closing axis (4.7 cm)
 OPEN = float(os.environ.get("OPEN", 0.23))  # how far the demo pulls (the goal is 15 cm; the sash stops at 24 cm). OPEN=0.45
 # yanks on 21 cm past the end stop, which tears the handle off: the failure the task guards against
 MOVE = 0.08  # m/s, moving in free space
@@ -306,4 +320,18 @@ def demo():
                    "reach around the handle")
     right += [Waypoint(0.5, grip, FINGER_CLOSED, "grip")]
     right += _play(_rounded([grip, pulled, away], TURN), pull_speed, fingers, "pull, let go and draw back")
-    return {"right": right}
+    if not TOUCH:
+        return {"right": right}
+    # TOUCH=1, the contact check in the simulation: the same pull, while the left gripper rests one finger against the
+    # outside of the frame's left jamb, its tool point 2.3 cm outside the jamb (fingers open, closing along y: the inner
+    # pad is 4.7 cm from the tool point and presses 4 mm into the jamb's face). Nothing pushes the sash; PhysX reports
+    # the left finger on the frame, so none of the opening counts and the score stays 0.
+    jamb = Y_L + JAMB  # the left jamb's outside face
+    side = (X, jamb + PAD_REACH - 0.004, TOP + 0.12)
+    clear = (side[0], jamb + PAD_REACH + 0.012, side[2])
+    left = [Waypoint(2.5, (clear[0] - 0.05, clear[1], TOP + 0.18), FINGER_OPEN, "beside the frame's left end"),
+            Waypoint(1.5, clear, FINGER_OPEN, "down beside the left jamb"),
+            Waypoint(1.0, side, FINGER_OPEN, "a finger against the jamb")]
+    hold = sum(w.duration for w in right) + 3.0 - sum(w.duration for w in left)
+    left += [Waypoint(hold, side, FINGER_OPEN, "hold it there while the right hand pulls")]
+    return {"right": right, "left": left}

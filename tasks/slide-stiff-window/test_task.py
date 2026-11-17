@@ -28,10 +28,17 @@ RUN_LIMIT = 1200
 RESET = TASK.score.__globals__["reset_credit"]  # the loaded task's own counter (``task`` imported above is a second copy)
 
 
-def window(opened=0.0, give=0.0, torn=False, speed=0.0, hand="on", fingers=0.13, push=0.0, other=None):
+HOLD = ["right_robot/tip_left", "right_robot/tip_right"]  # the right gripper's fingers on the handle's grip bar
+
+
+def window(opened=0.0, give=0.0, torn=False, speed=0.0, hand="on", fingers=0.13, push=0.0, other=None, touch=None,
+           contacts="auto"):
     """hand: "on" (a gripper's tool point at the grip bar), "off" (far away) or "push" (at the sash's far edge).
     push: the force (N) something other than the handle puts on the sash in the opening direction (the track's friction,
-    the joint's drive, balances the rest, with the sash not accelerating)."""
+    the joint's drive, balances the rest, with the sash not accelerating).
+    touch: extra robot contacts PhysX reports, {"body" | "sash" | "handle": ["arm/link", ...]}. With contacts="auto" the
+    right fingers touch the handle when the hand is "on" (closed on it), and its fingertip touches the sash when "push".
+    contacts=None: PhysX reported nothing (the contact view failed)."""
     p = np.array(T.WINDOW.pos, dtype=float)
     q = {"sash": -opened, "handle": -give}
     bar = np.array([T.X + T.SASH_FRONT + T.SASH_D / 2 + T._FACE - T.STAND - T.BAR_X / 2,
@@ -39,10 +46,19 @@ def window(opened=0.0, give=0.0, torn=False, speed=0.0, hand="on", fingers=0.13,
     tcp = {"on": bar, "off": np.array([0.15, -0.3, T.TOP + 0.2]), "push": bar + np.array([0.0, T.SASH_W, 0.0])}[hand]
     left = np.array([0.15, 0.3, T.TOP + 0.2]) if other is None else np.asarray(other, dtype=float)
     hands = {"right_robot": {"tcp": tcp, "open": fingers}, "left_robot": {"tcp": left, "open": 1.0}}
+    if contacts == "auto":
+        contacts = {"body": [], "sash": [], "handle": []}
+        if hand == "on" and fingers < 0.3:
+            contacts["handle"] += HOLD
+        if hand == "push":
+            contacts["sash"] += ["right_robot/tip_left"]
+        for part, links in (touch or {}).items():
+            contacts[part] = contacts[part] + list(links)
     return {"window": FixtureState(pos=p, quat_xyzw=np.array([0, 0, 0, 1.0]), lin_vel=np.zeros(3), ang_vel=np.zeros(3),
                                    low=p, high=p, q=q, speed={"sash": -speed, "handle": 0.0},
                                    broken={"sash": False, "handle": torn}, hands=hands,
-                                   drive={"sash": T.HANDLE_K * give + push, "handle": 0.0}, accel={"sash": 0.0, "handle": 0.0})}
+                                   drive={"sash": T.HANDLE_K * give + push, "handle": 0.0}, accel={"sash": 0.0, "handle": 0.0},
+                                   contacts=contacts)}
 
 
 def trial(*states):
@@ -114,15 +130,41 @@ def test_one_gripper_lightly_tensioning_the_handle_while_the_other_pushes_earns_
     assert trial(*[window(0.01 * k, give=0.002, push=3.0) for k in range(1, 21)]) == 0.0
 
 
-def test_the_other_gripper_touching_the_sash_glass_or_frame_earns_nothing():
-    on_sash = (T.X + T.SASH_FRONT - 0.005, T.SASH_Y, T.TOP + T.SILL + 0.10)  # resting on the sash's face, no force
-    on_frame = (T.X, T.Y_L + T.JAMB / 2, T.TOP + T.SILL + T.H + 0.005)  # on the head, above the left jamb
-    for other in (on_sash, on_frame):
-        assert trial(*[pulled(0.01 * k, give=0.009, other=other) for k in range(1, 21)]) == 0.0
+AWAY = (0.20, 0.30, T.TOP + 0.10)  # the left tool point well outside the window, 10 cm and more from it
+
+
+@pytest.mark.parametrize("touch", [
+    {"body": ["left_robot/link4"]},  # the left forearm resting on the frame
+    {"sash": ["left_robot/link5"]},  # the left wrist leaning on the sash
+    {"sash": ["left_robot/gripper"]},  # the back of the left gripper on the sash's glass, its fingertips away
+    {"body": ["right_robot/link5"]},  # the gripping arm's own wrist pressing the frame while it pulls
+    {"sash": ["right_robot/gripper"]},  # the gripping hand's knuckles on the sash while its fingers hold the bar
+    {"handle": ["left_robot/tip_left"]},  # the other gripper pushing the handle along
+])
+def test_another_robot_part_touching_the_window_earns_nothing_wherever_its_tool_point_is(touch):
+    # no force on the sash besides the handle's pull, and the left tool point far from the window: only the contact
+    # PhysX reports between a robot link and the window shows the touch
+    assert trial(*[pulled(0.01 * k, give=0.009, other=AWAY, touch=touch) for k in range(1, 21)]) == 0.0
+
+
+def test_a_touch_only_stops_credit_while_it_lasts():
+    seq = [pulled(0.01 * k, give=0.009, other=AWAY) for k in range(1, 9)]  # 8 cm pulled cleanly
+    seq += [pulled(0.01 * k, give=0.009, other=AWAY, touch={"body": ["left_robot/link4"]}) for k in range(9, 15)]
+    seq += [pulled(0.01 * k, give=0.009, other=AWAY) for k in range(15, 21)]  # 6 cm more, cleanly
+    assert trial(*seq) == 0.75  # 8 + 6 = 14 cm counted, not 20
+
+
+def test_unknown_contacts_count_nothing():
+    assert trial(*[pulled(0.01 * k, give=0.009, contacts=None) for k in range(1, 21)]) == 0.0
 
 
 def test_the_other_gripper_away_from_the_window_does_not_matter():
-    assert trial(*[pulled(0.01 * k, give=0.009, other=(0.20, 0.30, T.TOP + 0.10)) for k in range(1, 21)]) == 1.0
+    assert trial(*[pulled(0.01 * k, give=0.009, other=AWAY) for k in range(1, 21)]) == 1.0
+
+
+def test_the_other_gripper_near_the_window_without_touching_it_does_not_matter():
+    near = (T.X + T.SASH_FRONT - 0.01, T.SASH_Y, T.TOP + T.SILL + 0.10)  # 1 cm in front of the sash, not touching
+    assert trial(*[pulled(0.01 * k, give=0.009, other=near) for k in range(1, 21)]) == 1.0
 
 
 def test_a_little_force_noise_does_not_cancel_a_real_pull():

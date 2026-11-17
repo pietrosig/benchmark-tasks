@@ -62,6 +62,8 @@ class FixtureState(ObjectState):
     hands: dict = field(default_factory=dict)  # arm -> {"tcp": world xyz between the fingertips, "open": 0 closed .. 1 open}
     drive: dict = field(default_factory=dict)  # slider name -> force (N) its spring/friction drive puts on it, along its axis
     accel: dict = field(default_factory=dict)  # slider name -> acceleration (m/s^2) over the last control step
+    contacts: dict | None = None  # part ("body" or a slider's name) -> robot links touching it now, as "arm/link";
+    # None if PhysX could not report contacts
 
 
 def fixture(name, pos, boxes, sliders, color=(0.7, 0.7, 0.7)) -> Fixture:
@@ -76,6 +78,8 @@ _VPREV: dict = {}
 _ACCEL: dict = {}
 _BROKEN: dict = {}
 _STARTED: set = set()
+_CONTACT: dict = {}  # fixture name -> (contact view, robot links, parts, physics dt), or the error that stopped it
+CONTACT_N = 0.01  # N: a contact force above this between a robot link and a part of the fixture counts as touching
 
 
 def _joint(s: Slider) -> str:
@@ -261,7 +265,8 @@ def _state(env, spec: Fixture) -> FixtureState:
     p = np.array(spec.pos)
     return FixtureState(pos=p, quat_xyzw=np.array([0, 0, 0, 1.0]), lin_vel=np.zeros(3), ang_vel=np.zeros(3), low=p,
                         high=p, q=pos, speed=vel, broken={s.name: bool(_BROKEN.get(s.name)) for s in spec.sliders},
-                        hands=_hands(base), drive=drive, accel={s.name: _ACCEL.get(s.name, 0.0) for s in spec.sliders})
+                        hands=_hands(base), drive=drive, accel={s.name: _ACCEL.get(s.name, 0.0) for s in spec.sliders},
+                        contacts=_robot_contacts(base, spec))
 
 
 def _step_key(base, step_dt: float) -> int:
@@ -290,6 +295,74 @@ def _hands(base) -> dict:
         opening = float(_np(robot.data.joint_pos)[0][fingers].mean() / FINGER_OPEN)
         out[arm] = {"tcp": tcp_world(robot) - origin, "open": float(np.clip(opening, 0.0, 1.0))}
     return out
+
+
+def _host(x) -> np.ndarray:
+    if hasattr(x, "detach"):
+        return x.detach().cpu().numpy()
+    if hasattr(x, "numpy"):
+        return np.asarray(x.numpy())
+    import warp as wp
+    return wp.to_torch(x).cpu().numpy()
+
+
+def _rigid_bodies(stage, root: str) -> list:
+    from pxr import Usd, UsdPhysics
+    return [p for p in Usd.PrimRange(stage.GetPrimAtPath(root), Usd.TraverseInstanceProxies())
+            if p.HasAPI(UsdPhysics.RigidBodyAPI)]
+
+
+def _contact_view(base, spec: Fixture):
+    """A PhysX contact view from every link of both arms (the YAM spawns them with contact reporting on) to each rigid
+    body of the fixture: its base ("body") and each slider."""
+    from isaaclab.sim.utils.stage import get_current_stage
+    from isaaclab_physx.physics import PhysxManager
+
+    stage = get_current_stage()
+    env0 = base.scene.env_prim_paths[0]
+
+    def root(key):
+        return f"{env0}/{base.scene[key].cfg.prim_path.rstrip('/').rsplit('/', 1)[-1]}"
+
+    links, sensors = [], []
+    for arm in ("left_robot", "right_robot"):
+        if arm not in base.scene.keys():
+            continue
+        for p in _rigid_bodies(stage, root(arm)):
+            if "PhysxContactReportAPI" in p.GetAppliedSchemas():
+                links.append((arm, p.GetName()))
+                sensors.append(p.GetPath().pathString)
+    parts, filters = [], []
+    for p in _rigid_bodies(stage, root(spec.name)):
+        parts.append(p.GetName())
+        filters.append(p.GetPath().pathString)
+    if not sensors or not filters:
+        raise RuntimeError(f"no robot links ({len(sensors)}) or fixture bodies ({len(filters)}) found")
+    view = PhysxManager.get_physics_sim_view().create_rigid_contact_view(
+        sensors, filter_patterns=[filters] * len(sensors), max_contact_data_count=0)
+    if view.sensor_count != len(sensors) or view.filter_count != len(filters):
+        raise RuntimeError(f"contact view has {view.sensor_count} x {view.filter_count}, "
+                           f"expected {len(sensors)} x {len(filters)}")
+    dt = float(getattr(base, "physics_dt", None) or base.sim.get_physics_dt())
+    print(f"[slidekit] contact view for {spec.name}: {len(sensors)} robot links x parts {parts}", flush=True)
+    return view, links, parts, dt
+
+
+def _robot_contacts(base, spec: Fixture) -> dict | None:
+    """For each part of the fixture, the robot links touching it at the last physics step, as "arm/link": from PhysX's
+    contact force matrix between every link of both arms and the fixture's rigid bodies. None if PhysX can't report it."""
+    v = _CONTACT.get(spec.name)
+    if v is None:
+        try:
+            v = _CONTACT[spec.name] = _contact_view(base, spec)
+        except Exception as e:  # noqa: BLE001
+            v = _CONTACT[spec.name] = f"{type(e).__name__}: {e}"
+            print(f"[slidekit] contact view for {spec.name} failed: {v}", flush=True)
+    if isinstance(v, str):
+        return None
+    view, links, parts, dt = v
+    n = np.linalg.norm(_host(view.get_contact_force_matrix(dt=dt)).reshape(len(links), len(parts), 3), axis=-1)
+    return {p: [f"{a}/{link}" for (a, link), f in zip(links, n[:, j]) if f > CONTACT_N] for j, p in enumerate(parts)}
 
 
 def _patch(scene) -> None:
