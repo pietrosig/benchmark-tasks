@@ -1,0 +1,22 @@
+{
+  "title": "Put an e-bike's frame battery back on: its contacts blind into the lower holder first, then swing it in until it clicks",
+  "category": "Societal relatability",
+  "keywords": [
+    "bimanual",
+    "e-bike",
+    "battery",
+    "blind insertion",
+    "pivot",
+    "heavy part",
+    "latch"
+  ],
+  "instruction": "Put the battery back on the e-bike.",
+  "context": "E-bike owners take the battery off to charge it indoors and put it back several times a week: e-bikes were 53% of bikes sold in Germany in 2024 (2.05 million) and 5.1 million were sold in Europe in 2023. The 3 kg battery goes on bottom end first, its contacts sliding unseen into the lower holder, which lets it tilt only about 7 degrees, then it is swung in and pressed until the latch clicks.",
+  "setup": "Station bench (wooden top) with the two YAM arms 61 cm apart. Positions in cm from the midpoint between the arm bases: x forward, y toward the left arm, z above the bench top. E-bike: the frame of a Bosch smart-system step-through e-bike (aluminium; wheels, fork, cranks and pedals off), upright at x 34, its front toward the left arm, its seat post held in a bike repair stand's clamp at about y -47, z 62, its drive unit resting on a 1 cm rubber block on the bench. The 64 mm down tube rises 25 degrees from the drive unit (centre line at y -23, z 9) to the head tube (y 42, z 39); the drive unit (20 x 10 x 14 cm) sits under its lower end, crank axle at y -31, z 7; the seat tube rises from it to the clamp; the rear stays run past the bench's right edge. On top of the down tube are the Bosch PowerPack Frame holders: the lower (plug-side) holder just above the drive unit, its pocket opening up the tube (end wall at y -19, z 15), and the upper (lock-side) holder 34 cm further up (y 16 to 19, z 31 to 35), its key not in the lock. Battery: Bosch PowerPack Frame 540 (BBP3553), 338 x 93 x 81 mm, 3.0 kg, black plastic casing, its contact block on the back of its bottom end; it lies on its right flank on the bench, along y from y -17 (bottom end, on the right) to y 17, its back (the face that goes on the tube) toward the arms at x 16, its top face at x 24. Home, its bottom back corner is at x 34, y -15, z 17. For trials use a retired (dead, BMS-locked) PowerPack Frame 540 at its full weight. Nothing else is on the bench.",
+  "scoring": "From the trial video, a ruler and a hand check after the trial. If the battery falls (drops out of the grippers onto the bench, the frame or the floor) before it has clicked in: 0 for the trial. Otherwise, at the end: 0 unless its bottom end is home in the lower holder (contact block in the pocket, the end within 3 mm of home along the tube and 4 mm sideways, square to the tube within 5 degrees); 0.25 with the bottom end home; 0.5 if its top end is also swung in to within 10 mm of the upper holder's seat; 1.0 if it has clicked into the upper holder's latch (its top end can't be lifted off by hand) and is still home.",
+  "run_limit": "2,000 steps (100 seconds at 20 Hz)",
+  "reset_notes": "Open the lock with its key, tilt the battery out of the upper holder, pull it out of the lower holder, take the key out and lay the battery back on its flank at the start position. Safety: the frame is clamped and rests on the bench; the battery is a retired one and can fall at most about 40 cm, onto a soft mat under the frame; nobody reaches into the arms' workspace during a trial.",
+  "fidelity": "Real-size frame, holders and battery as rigid bodies (tubes as cylinders, drive unit as a box). The Bosch pocket and contact block are not published, so they are sized like the real parts: 3 mm of play, about 7 degrees of tilt. The latch is a spring plunger under the battery's top end (15 N, 30 N pressed flush) and a bolt that runs into a notch in the battery once it is pressed home (a rule). The frame is fixed. Friction 0.6.",
+  "scores": "Dream-1 run: 0.0 (2,000 steps). The battery never moved. The right arm (right of video) hovered over the lower holder and drive unit (8-40 s, 60-70 s) and came within 6 cm of the battery's bottom end (78 s); the left arm stayed by its base, fingers closed. Scripted demo: 1.0 (clicked in at 25 s).",
+  "media": "M-9NXEJT"
+}
