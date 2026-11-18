@@ -39,6 +39,7 @@ class Fruit(Sphere):
 class FruitState(ObjectState):
     force: dict = field(default_factory=dict)  # "arm/link" -> contact force (N) that robot link puts on the fruit now
     hands: dict = field(default_factory=dict)  # arm -> {"tcp": world xyz between the fingertips, "gap": pad gap (m)}
+    t: float | None = None  # simulated time of this control step (s): the env's step counter times its step; None if unknown
 
     @property
     def robot_force(self) -> float:
@@ -359,6 +360,22 @@ def _forces(base) -> dict | None:
             for j, f in enumerate(names)}
 
 
+def _step_time(base) -> float | None:
+    """The simulated time of the current control step (s): the env's step counter times the control step, else the
+    simulation clock; None if neither is available."""
+    step_dt = float(getattr(base, "step_dt", 0.05))
+    c = getattr(base, "common_step_counter", None)
+    if c is not None:
+        return int(c) * step_dt
+    for attr in ("current_time", "_current_time"):
+        try:
+            v = getattr(base.sim, attr)
+            return float(v() if callable(v) else v)
+        except Exception:  # noqa: BLE001
+            continue
+    return None
+
+
 def _patch(scene) -> None:
     if getattr(scene, "_fruitkit", False):
         return
@@ -378,11 +395,11 @@ def _patch(scene) -> None:
         fruits = [n for n in names if n in _SPECS]
         if fruits:
             base = env.unwrapped
-            forces, hands = _forces(base), _hands(base)
+            forces, hands, t = _forces(base), _hands(base), _step_time(base)
             for n in fruits:
                 s = out[n]
                 out[n] = FruitState(pos=s.pos, quat_xyzw=s.quat_xyzw, lin_vel=s.lin_vel, ang_vel=s.ang_vel, low=s.low,
-                                    high=s.high, force=None if forces is None else forces.get(n, {}), hands=hands)
+                                    high=s.high, force=None if forces is None else forces.get(n, {}), hands=hands, t=t)
         return out
 
     scene.task_object, scene.object_states, scene._fruitkit = task_object, object_states, True
