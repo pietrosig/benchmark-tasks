@@ -1,0 +1,20 @@
+{
+  "title": "Assemble a rack-and-pinion parallel gripper, seating the second rack at the tooth that centres its jaws",
+  "category": "Impact on AI timelines",
+  "keywords": [
+    "robot building",
+    "gripper assembly",
+    "rack and pinion",
+    "gear mesh",
+    "bimanual"
+  ],
+  "instruction": "Seat the loose orange rack on the pinion so the gripper's two fingers sit evenly about its centre, then pull the white finger at least 15 mm further open, without touching the orange rack, and let go.",
+  "context": "Synchronised parallel grippers, pneumatic or electric (e.g. Festo HPPF, rack-and-pinion jaw drive), keep both jaws centred with one pinion between two racks; building or re-building such a gripper means seating the second rack at the tooth that matches the other finger's measured opening, read from the scene. Any other tooth still meshes but leaves the jaws 4.7 mm off-centre, biasing every grasp made with that hardware.",
+  "setup": "Positions in mm from the midpoint between the arm bases (x forward, y left); heights above the table top. Gripper housing, free on the table, centre (240, 0) on four tape corner marks, long side along y: dark printed PETG floor 160 x 52 mm on a 6 mm steel bar (460 g in all), walls 12 mm tall, inner faces 45 mm apart, a 5 mm rail under each rack, stop blocks at y +40 to +44 (white channel) and -44 to -40 (orange), a 1 mm yellow scale along each wall top. Pinion at the centre, free on an M4 shoulder screw: 27 mm disc, 4 mm thick, holding eight 3 x 16 mm steel dowel pins 3.5 mm deep on a 24 mm circle (9.42 mm pitch), 10 g. Racks: printed PETG, 88 mm, 12 mm tall, 13 g, tooth gaps 3.4 mm (0.4 mm backlash), rounded crests, a 7.5 x 6 x 30 mm finger plate at the outer end, a 7 x 6 x 19.5 mm finger-mount boss on top. White rack: near channel (x 228), one tooth (9.4 mm) open from its stop. Orange rack: loose on the table at x 252, y 140, teeth toward -x.",
+  "scoring": "From a top photo (wall scales), a straightedge and the trial video. 0 if either rack is not seated in its channel (top flush with the pins within 1.5 mm, against its wall within 1.5 mm, within 3 deg of level and 4 of straight) or the fingers are off-centre: |s_white - s_orange| / 2 over 2.0 mm (s = finger travel from its stop; one tooth off is 4.7 mm). 1.0: seated and centred, each rack having travelled at least 15 mm apart while the orange rack was not touched (from the video), both fingers at least 15 mm open, then released, racks still, grippers 30 mm clear, for 4 s. 0.5: seated and centred otherwise.",
+  "run_limit": "1,200 steps (60 seconds at 20 Hz)",
+  "reset_notes": "Lift the orange rack out and stand it on its mark; slide the white rack to its stop, then open it one tooth (9.4 mm on its scale); put the housing back on its tape marks.",
+  "fidelity": "Rigid-body PhysX with the printed parts' real sizes and masses (housing 460 g, racks 13 g, pinion 10 g) and the real 0.4 mm backlash. Teeth and chamfers are stepped boxes (the printed parts have true chamfers, gripper.scad); pins are 3 mm cylinders with rounded tops. Seating, meshing and the coupled drive are contacts, not rules. Rack friction 0.25. The gripper's cover and actuator (servo or cylinder) are omitted: it is assembled bare.",
+  "scores": "Dream-1 run: 0.0 (both arms rose about 25 cm above the table and hovered beside the parts, never closer than 28 cm, nothing touched); scripted demo: 1.0 (orange rack seated at the centring tooth, |d| 0.12 mm, 19 mm of coupled travel, success at step 559)",
+  "media": "M-AVPUVR"
+}
