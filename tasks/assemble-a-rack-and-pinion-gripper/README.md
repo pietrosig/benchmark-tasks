@@ -44,19 +44,43 @@ Fit checks after printing:
 
 ## Scoring
 
-Final state, from a top photo (the wall scales), a straightedge across the pins, and the trial video.
+Final state, from a top photo (the wall scales), a straightedge across the pins, a hand check of the mesh, and the
+trial video.
 
-- **0** if either rack is not seated in its channel, or the fingers are off-centre.
-  - Seated means: top flush with the pins' tops within 1.5 mm; against its wall within 1.5 mm; within 3° of level and
-    4° of straight.
-  - Off-centre means |s_white − s_orange| / 2 over 2.0 mm. One tooth off is always 4.7 mm; backlash allows 0.4 mm.
-- **1.0**: seated and centred, and all of the following:
+- **0** unless both racks are in mesh with the pinion and the fingers are centred.
+  - **Seated** in its own channel: top flush with the pins' tops within 1.5 mm; against its wall within 1.5 mm; within
+    3° of level and 4° of straight.
+  - **Over the pinion:** the pinion's axis lies between the rack's first and last tooth, so the pin at the mesh point
+    has a tooth on each side of it. In the photo, at least two of the rack's teeth are across the pinion's pins.
+  - **In mesh:** the pin at the mesh point sits in one of the rack's tooth gaps. A rack lying on the pin tips is not
+    seated, and a rack slid out past the pinion does not overlap it.
+  - **Centred:** |s_white − s_orange| / 2 at most 2.0 mm. One tooth off is always 4.7 mm; backlash allows 0.4 mm.
+- **1.0**: in mesh and centred, and all of the following:
   - each rack travelled at least 15 mm apart while the orange rack was not touched. On video: only the white rack, or
-    the pinion, was handled during the opening. In the simulation: no robot link touched the orange rack and no
-    tool point was within 20 mm of it.
+    the pinion, was handled during the opening. In the simulation: no robot link touched the orange rack and no tool
+    point was within 20 mm of it.
   - both fingers at least 15 mm open;
-  - then released: racks still and every gripper 30 mm clear, held for 4 s.
-- **0.5**: seated and centred otherwise.
+  - then released: racks still and every gripper 30 mm clear, held for the last 4 s.
+- **0.5**: in mesh and centred otherwise.
+
+**Real-trial mesh check**, after the end photo:
+1. The tester pushes the white finger 5 mm back toward its stop with one finger (outward instead, if it is less than
+   5 mm from its stop).
+2. On the wall scales, the orange finger must move 5 mm the same way relative to its own stop, within 2 mm (backlash
+   up to 0.5 mm, plus reading 1 mm scales by eye). If it doesn't, the trial scores 0. Racks not in mesh don't move
+   together, and a rack out past the pinion can't be driven.
+3. The tester then reads both scales once more and checks the fingers are still even.
+
+**How the 4 s hold is enforced:**
+- In yam_arena, the trial framework calls the task's `success()` every control step. It counts the consecutive steps
+  for which `success()` is true, and ends the episode with termination_reason "success" once the count reaches
+  `SUCCESS_HOLD_S` × 20 = 80 steps (`yam_arena/inspect_embodiment.py`, `_task_step`).
+- The `task_score` scorer then reports 1.0 (`yam_arena/scoring.py`).
+- A run that reaches its step limit first is scored by the last step's `score()`. So `score()` in task.py counts the
+  same hold itself: it returns 1.0 only after the full-score state has held for 80 consecutive control steps, and
+  0.5 before that.
+- Either way, a 1.0 requires the full 4 s. Tests: `test_full_score_needs_80_steps_of_hold`,
+  `test_hold_restarts_if_interrupted`, `test_success_flags_the_state_and_yam_arena_counts_the_same_hold`.
 
 In the simulation, every control step reads:
 - the racks' poses in the housing's frame (the housing is free);
@@ -64,7 +88,24 @@ In the simulation, every control step reads:
 - the gripper tool points;
 - PhysX contacts between every robot link and each part.
 
-The record of coupled travel is cleared at each episode reset.
+The record of coupled travel, and of the hold, is cleared at every environment reset: gripkit's reset hook calls the
+task's `_reset_record`, and the record is also cleared if the step counter ever goes backwards.
+
+### Earlier feedback on TK-97PN32 and how it is covered
+
+1. **Placing both racks evenly on the rails beyond the pinion scored 0.5.** Now every tier needs both racks over the
+   pinion and in mesh with it, and the coupled-travel record only counts while both are in mesh. Tests:
+   - `test_both_racks_symmetric_beyond_the_pinion_score_zero` (racks 45 to 60 mm open, off the pinion);
+   - `test_symmetric_beyond_the_pinion_held_still_never_scores`;
+   - `test_one_rack_meshed_and_one_beyond_scores_zero`;
+   - `test_rack_between_teeth_phases_is_not_meshed`;
+   - `test_pinion_turned_away_from_both_racks_is_not_meshed`;
+   - `test_meshed_at_the_wrong_tooth_scores_zero`;
+   - `test_meshed_and_even_at_many_openings`;
+   - `test_mesh_holds_at_both_backlash_extremes`.
+2. **A practical real-trial check for the mesh.** The end photo must show the rack's teeth across the pins, and the
+   hand check must pass: 5 mm on the white finger moves the orange finger 5 mm, within 2 mm, or the trial scores 0.
+3. **Verify the four-second hold.** See "How the 4 s hold is enforced" above.
 
 ### Earlier feedback on TK-JUWHH6 and how it is covered
 
@@ -94,8 +135,12 @@ inspect-robots run --embodiment yam_arena --policy yam_scripted -E task=task.py 
   - the mesh clearance at every pinion angle;
   - backlash at most 0.5 mm;
   - the right tooth passing at both backlash extremes, and ±1 and 2 teeth off scoring 0;
-  - a rack lifted out, a tilted rack, both racks dragged by hand, and a gripper left near the jaws.
-- Runtime per trial: about 5 minutes wall clock for the scripted demo (559 steps) on one shared GPU, plus about 1 to 2 minutes of Isaac Sim start-up; a full 1,200-step trial takes about 10 minutes.
+  - a rack lifted out, a tilted rack, both racks dragged by hand, and a gripper left near the jaws;
+  - racks placed evenly beyond the pinion, one rack meshed and one not, a rack between tooth phases, and a pinion
+    turned away from both racks (all 0);
+  - the 4 s hold (79 steps score 0.5, 80 score 1.0, and the hold restarts if interrupted).
+  There are 33 tests.
+- Runtime per trial: about 5 to 6 minutes wall clock for the scripted demo (559 steps) on one shared GPU, plus about 1 to 2 minutes of Isaac Sim start-up; a full 1,200-step trial takes about 10 minutes.
 - Seeds: none; the layout is fixed (`-E object_jitter=0`) and the scripted demo is open loop.
 
 ## Scripted demo
@@ -112,22 +157,25 @@ inspect-robots run --embodiment yam_arena --policy yam_scripted -E task=task.py 
    - pulls it 21 mm further open; the pinion drives the orange rack the other way, with no hand near it;
    - lets go and parks to the right.
 
-Result (task file sha256 945338f5ebce, 1280 x 704):
-- task_score 1.0, ended as a success at step 559 of 1,200 (28 s simulated, 276 s wall clock).
-- The orange rack was seated at step 270, at the centring tooth: d = −0.09 mm.
+Result (task file sha256 1798dafaf4bd, 1280 x 704):
+- task_score 1.0, ended as a success at step 559 of 1,200: after the full-score state had held for 80 control steps (4 s).
+- The orange rack was seated and in mesh from about step 260 of the episode, at the centring tooth: d = −0.07 mm.
+  The trace's step counter runs about 10 ahead of the episode's.
 - Coupled opening: 18.96 mm of travel by each rack with the orange rack untouched.
-- At the end: fingers 29.3 and 29.05 mm open, d = 0.12 mm, both racks seated (0.0° tilt), housing unmoved.
-- The arms parked clear for the last 4 s, so the final frames show the released, centred, open jaws.
+- At the end: fingers 29.3 and 29.05 mm open, d = 0.12 mm, both racks over the pinion and in mesh, housing unmoved.
+- The arms parked clear for the last 4 s.
 
 ## Dream-1
 
-One run on the final files (same task.py, sha256 945338f5ebce, the final instruction, 1280 x 704, 1,200 steps):
-task_score 0.0, hit the step limit.
-- Both arms rose to about 25 cm above the table: the left arm on the left of the video, the right on the right.
-- From about 20 s on, they hovered with their grippers turned toward the parts, slowly drifting toward the robot's
-  side.
-- They never came down: no gripper came closer than 28 cm to the white rack or 32 cm to the orange rack.
-- Nothing was touched; the orange rack stayed where it started on the table.
+One run on the final files (same task.py, sha256 1798dafaf4bd, the same instruction, 1280 x 704, 1,200 steps):
+task_score 0.0, hit the step limit (key_in_outputs 0). From the trace and the six sampled frames:
+- **Left arm** (on the left of the video): rose to 24–34 cm above the table (median 28 cm) and hovered with its
+  gripper turned toward the parts. Its closest approach was 25 cm to the orange rack, at about 22 s.
+- **Right arm** (on the right of the video): rose to 20–29 cm above the table (median 26 cm) and hovered the same
+  way. Its closest approach was 24 cm to the white rack, at about 23 s.
+- Both drifted slowly toward the robot's side over the run.
+- No tool point came closer than about 23 cm to any part, and nothing was touched. The orange rack stayed where it
+  started on the table, so it was never in mesh.
 
 ## How it is modelled
 
@@ -138,6 +186,9 @@ task_score 0.0, hit the step limit.
   - reports poses, joint angle and robot contacts.
 - Geometry and masses follow the printed parts. There are no rules: seating, meshing and the coupled drive are all
   contacts.
+- The scorer reads the mesh from the racks' poses and the pinion's angle:
+  - the pinion's axis between each rack's first and last tooth;
+  - the pin nearest the mesh point within 0.7 mm of a tooth-gap centre (the gap's 0.2 mm clearance plus 0.5 mm).
 - The gripper's cover and actuator (servo or cylinder) are omitted: it is assembled bare.
 - Simplifications:
   - the teeth's rounded crests and lead-in feet are stepped boxes (the printed parts have true chamfers, gripper.scad);

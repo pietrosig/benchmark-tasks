@@ -32,12 +32,15 @@ def _yaw_q(a):
     return (0.0, 0.0, math.sin(a / 2), math.cos(a / 2))
 
 
-def scene(task, step, *, sn, sf, far_seated=True, near_seated=True, hands=None, touch=None, far_pos=None, tilt=0.0):
-    """Racks at openings sn, sf (m) in an unmoved housing."""
+def scene(task, step, *, sn, sf, far_seated=True, near_seated=True, hands=None, touch=None, far_pos=None, tilt=0.0,
+          pinion=None):
+    """Racks at openings sn, sf (m) in an unmoved housing. The pinion's angle follows the white rack unless given:
+    (sn - one tooth) / R, so the white rack is in mesh."""
     hands = hands or FAR_HANDS
     touch = touch or {}
+    th = (sn - task.START_OPEN) / task.R if pinion is None else pinion
     h = SimpleNamespace(pos=np.array([task.XH, task.YH, task.TOP]), quat_xyzw=np.array(UP), hands=hands,
-                        contacts={"body": touch.get("housing", []), "pinion": []}, step=step, q={"pinion": 0.0})
+                        contacts={"body": touch.get("housing", []), "pinion": []}, step=step, q={"pinion": th})
     def rack(side, s, seated_, name):
         p = np.array([task.XH + side * task.R, task.YH + side * (task.CLOSED_C + s), task.TOP + task.RB])
         if not seated_:
@@ -103,12 +106,13 @@ def test_wrong_tooth_scores_zero(task, teeth):
     assert run(task, [scene(task, 0, sn=s0, sf=s0 + teeth * task.P)]) == 0.0
 
 
-def _opening_run(task, *, touch_far=False, touch_both=False, steps=60):
+def _opening_run(task, *, touch_far=False, touch_both=False, steps=150, hold_from=40):
+    """The white rack pulled 17.5 mm further open over 40 steps (by hand), then everything released and still."""
     states = []
     for k in range(steps):
         s = task.START_OPEN + 0.0175 * min(1.0, k / 40)
         touch = {}
-        if k < 40:
+        if k < hold_from:
             touch["near"] = ["right_robot/tip_left"]
             if touch_far or touch_both:
                 touch["far"] = ["left_robot/tip_left"]
@@ -125,7 +129,8 @@ def test_both_racks_dragged_by_hand_scores_half(task):
 
 
 def test_open_but_not_far_enough(task):
-    states = [scene(task, k, sn=task.START_OPEN + 0.004 * k / 30, sf=task.START_OPEN + 0.004 * k / 30) for k in range(40)]
+    states = [scene(task, k, sn=task.START_OPEN + 0.004 * min(k, 30) / 30, sf=task.START_OPEN + 0.004 * min(k, 30) / 30)
+              for k in range(150)]
     assert run(task, states) == 0.5
 
 
@@ -159,7 +164,7 @@ def test_gripper_still_near_the_jaws_scores_half(task):
 
 def test_dragging_the_orange_rack_does_not_count(task):
     states = []
-    for k in range(60):
+    for k in range(150):
         s = task.START_OPEN + 0.0175 * min(1.0, k / 40)
         states.append(scene(task, k, sn=s, sf=s, touch={"far": ["left_robot/tip_left"]} if k < 40 else {}))
     assert run(task, states) == 0.5
@@ -169,3 +174,106 @@ def test_record_is_cleared_on_a_new_episode(task):
     assert _opening_run(task) == 1.0
     assert run(task, [scene(task, 0, sn=task.START_OPEN, sf=task.START_OPEN)]) == 0.5
     assert task._H["coupled"] == 0.0
+
+
+# -- review of TK-97PN32: mesh and overlap, every tier --------------------------------------------------------------------
+@pytest.mark.parametrize("s", [0.045, 0.050, 0.060])
+def test_both_racks_symmetric_beyond_the_pinion_score_zero(task, s):
+    """Both racks seated on their rails, evenly placed, but slid out past the pinion: no mesh, no credit."""
+    st = scene(task, 0, sn=s, sf=s)
+    assert task.seated(st, "near") and task.seated(st, "far")
+    assert not task.overlaps(st, "near") and not task.overlaps(st, "far")
+    assert run(task, [st]) == 0.0
+
+
+def test_symmetric_beyond_the_pinion_held_still_never_scores(task):
+    assert run(task, [scene(task, k, sn=0.05, sf=0.05) for k in range(200)]) == 0.0
+
+
+def test_one_rack_meshed_and_one_beyond_scores_zero(task):
+    st = scene(task, 0, sn=task.START_OPEN, sf=task.START_OPEN)
+    st["far"].pos = st["far"].pos + np.array([0.0, 0.040, 0.0])  # far rack slid 40 mm out, off the pinion
+    assert task.meshed(st, "near") and not task.meshed(st, "far")
+    assert run(task, [st]) == 0.0
+
+
+def test_rack_between_teeth_phases_is_not_meshed(task):
+    """Seated and over the pinion but half a pitch out of phase with the pins (it could only lie there on the tips)."""
+    st = scene(task, 0, sn=task.START_OPEN, sf=task.START_OPEN + task.P / 2)
+    assert task.overlaps(st, "far") and not task.meshed(st, "far")
+    assert run(task, [st]) == 0.0
+
+
+def test_pinion_turned_away_from_both_racks_is_not_meshed(task):
+    st = scene(task, 0, sn=task.START_OPEN, sf=task.START_OPEN, pinion=math.radians(22.5))
+    assert not task.meshed(st, "near") and not task.meshed(st, "far")
+    assert run(task, [st]) == 0.0
+
+
+@pytest.mark.parametrize("teeth", [1, -1])
+def test_meshed_at_the_wrong_tooth_scores_zero(task, teeth):
+    s0 = 2 * task.P
+    st = scene(task, 0, sn=s0, sf=s0 + teeth * task.P)
+    assert task.meshed(st, "near") and task.meshed(st, "far")
+    assert run(task, [st]) == 0.0
+
+
+def test_meshed_and_even_at_many_openings(task):
+    for k, s in enumerate(np.linspace(0.0, 0.029, 30)):
+        st = scene(task, k, sn=s, sf=s)
+        assert task.meshed(st, "near") and task.meshed(st, "far"), s
+
+
+def test_mesh_holds_at_both_backlash_extremes(task):
+    for bl in (-0.0002, 0.0002):
+        st = scene(task, 0, sn=task.START_OPEN, sf=task.START_OPEN + bl)
+        assert task.meshed(st, "far")
+
+
+# -- the 4 s hold is counted by score() itself ---------------------------------------------------------------------------
+def test_full_score_needs_80_steps_of_hold(task):
+    # released at step 40, still from step 41: the full-score state starts at step 41
+    assert _opening_run(task, steps=41 + 79) == 0.5  # 79 steps of it
+    sys.modules.pop("task", None)
+    t2 = importlib.import_module("task")
+    assert _opening_run(t2, steps=41 + 80) == 1.0  # 80 steps: 4 s
+
+
+def test_hold_restarts_if_interrupted(task):
+    states = []
+    for k in range(200):
+        s = task.START_OPEN + 0.0175 * min(1.0, k / 40)
+        touch = {"near": ["right_robot/tip_left"]} if k < 40 or 100 <= k < 102 else {}  # touched again at step 100
+        states.append(scene(task, k, sn=s, sf=s, touch=touch))
+    assert run(task, states[:170]) == 0.5  # 68 steps since the touch
+    assert run(task, states[170:]) == 1.0  # 98 steps since the touch
+
+
+def test_success_flags_the_state_and_yam_arena_counts_the_same_hold(task):
+    """success() is the full-score state without the hold: yam_arena ends the episode after it holds for
+    SUCCESS_HOLD_S (80 steps), the same step at which score() reaches 1.0."""
+    states = []
+    for k in range(150):
+        s = task.START_OPEN + 0.0175 * min(1.0, k / 40)
+        states.append(scene(task, k, sn=s, sf=s, touch={"near": ["right_robot/tip_left"]} if k < 40 else {}))
+    held = 0
+    end = None
+    for k, st in enumerate(states):
+        held = held + 1 if task.success(st) else 0
+        sc = task.score(st)
+        if held >= round(task.SUCCESS_HOLD_S * 20):
+            end = (k, sc)
+            break
+    assert end is not None and end[1] == 1.0
+
+
+def test_record_is_cleared_by_the_reset_hook(task):
+    import gripkit
+    assert task._reset_record in gripkit.RESET_HOOKS
+    assert _opening_run(task) == 1.0
+    for fn in gripkit.RESET_HOOKS:  # what gripkit's reset wrapper does after every environment reset
+        fn()
+    assert task._H["coupled"] == 0.0 and task._H.get("held", 0) == 0
+    # a second episode whose step counter does not restart still starts from an empty record
+    st = scene(task, 10_000, sn=task.START_OPEN, sf=task.START_OPEN)
+    assert run(task, [st]) == 0.5 and task._H["coupled"] == 0.0

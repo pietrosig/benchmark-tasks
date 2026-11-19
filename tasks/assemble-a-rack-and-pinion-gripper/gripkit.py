@@ -607,6 +607,9 @@ def _patch(scene):
     _patch_reset()
 
 
+RESET_HOOKS: list = []  # callables run after every environment reset
+
+
 def _apply_start(env):
     """Put every kit fixture's parts at their starting positions (and hold them there) right after a reset, so the
     settling steps, the first observation and the first frame already show the start state."""
@@ -635,6 +638,8 @@ def _patch_reset():
             def reset(self, *a, _orig=orig, **k):
                 out = _orig(self, *a, **k)
                 _apply_start(self)
+                for fn in RESET_HOOKS:  # e.g. a task clearing its per-episode record
+                    fn()
                 return out
             reset._kit3 = True
             cls.reset = reset

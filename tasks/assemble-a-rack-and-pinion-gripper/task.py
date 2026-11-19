@@ -146,6 +146,9 @@ def _reset_record():
     _H.update({"last": None, "prev": None, "coupled": 0.0})
 
 
+gripkit.RESET_HOOKS.append(_reset_record)  # cleared at every environment reset (one record per episode)
+
+
 def _rotm(q) -> np.ndarray:
     x, y, z, w = (float(v) for v in q)
     return np.array([[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
@@ -162,11 +165,48 @@ def rack_in_housing(objects, name):
 
 
 def seated(objects, name) -> bool:
+    """The rack lies in its own channel: pitch line within 1.5 mm, underside within 1.5 mm of its rail, within 3 degrees
+    of level and 4 of straight."""
     side = 1 if name == "far" else -1
     p, Rr = rack_in_housing(objects, name)
     tilt = math.acos(float(np.clip(Rr[2, 2], -1, 1)))
     yaw = math.atan2(Rr[1, 0], Rr[0, 0])
     return bool(abs(p[0] - side * R) <= SEAT_X and abs(p[2] - RB) <= SEAT_Z and tilt <= SEAT_TILT and abs(yaw) <= SEAT_YAW)
+
+
+def _tooth_span(side):
+    """The first and last tooth centres along the rack (its own y)."""
+    g0 = -side * CLOSED_C
+    ys = [g0 + (k + 0.5) * P for k in range(-12, 12) if abs(g0 + (k + 0.5) * P) <= RL / 2 - TW / 2 + 1e-9]
+    return min(ys), max(ys)
+
+
+def overlaps(objects, name) -> bool:
+    """The pinion's axis lies along the rack's toothed length, between its first and last tooth, so the pin at the
+    mesh point has a tooth on each side of it (at least 2 teeth of the rack over the pinion)."""
+    side = 1 if name == "far" else -1
+    p, _ = rack_in_housing(objects, name)
+    lo, hi = _tooth_span(side)
+    y_axis = -p[1]  # the pinion's axis (housing y = 0) in the rack's own y
+    return bool(lo <= y_axis <= hi)
+
+
+def meshed(objects, name) -> bool:
+    """Seated, over the pinion, and in mesh with it: the pin at the mesh point sits in one of the rack's tooth gaps
+    (its centre within the gap's clearance, 0.2 mm, plus 0.5 mm). A rack resting on the pin tips is not seated; a rack
+    beyond the pinion does not overlap it."""
+    if not (seated(objects, name) and overlaps(objects, name)):
+        return False
+    side = 1 if name == "far" else -1
+    p, _ = rack_in_housing(objects, name)
+    th = float(objects["housing"].q["pinion"])
+    target = 0.0 if side > 0 else math.pi  # the mesh point: +x for the far rack, -x for the near one
+    k = round((target - th) / (math.pi / 4))
+    pin_y = R * math.sin(th + k * math.pi / 4)  # the pin nearest the mesh point
+    g0 = -side * CLOSED_C
+    gap_local = (pin_y - p[1] - g0) / P  # in pitches from the rack's reference gap
+    off = abs(gap_local - round(gap_local)) * P
+    return bool(off <= (GAP - PIN_D) / 2 + 0.0005)
 
 
 def opening(objects, name) -> float:
@@ -217,15 +257,19 @@ def hands_clear(objects) -> bool:
     return True
 
 
+HOLD_STEPS = int(round(SUCCESS_HOLD_S / STEP_S))  # 80 control steps
+
+
 def _update(objects):
+    """Once per control step: coupled travel, rack speed, and how long the full-score state has held."""
     step = int(objects["housing"].step)
-    if _H["last"] is not None and step < _H["last"]:  # a new episode: clear the record
+    if _H["last"] is not None and step < _H["last"]:  # a new episode without a reset call: clear the record too
         _reset_record()
     if _H["last"] == step:
         return
     _H["last"] = step
     sn, sf = opening(objects, "near"), opening(objects, "far")
-    both = seated(objects, "near") and seated(objects, "far")
+    both = meshed(objects, "near") and meshed(objects, "far")
     one_free = not handled(objects, "far")  # driven from the white rack or the pinion, the orange rack untouched
     prev = _H["prev"]
     _H["speed"] = 0.0 if prev is None else max(abs(sn - prev[0]), abs(sf - prev[1])) / STEP_S
@@ -234,21 +278,33 @@ def _update(objects):
         if dn > 0 and df > 0:
             _H["coupled"] += min(dn, df)
     _H["prev"] = (sn, sf)
+    d = (sn - sf) / 2
+    _H["ok"] = bool(both and abs(d) <= SYM)
+    _H["full_now"] = bool(_H["ok"] and sn >= OPEN and sf >= OPEN and _H["coupled"] >= COUPLED
+                          and _H["speed"] < STILL and hands_clear(objects))
+    _H["held"] = _H.get("held", 0) + 1 if _H["full_now"] else 0
+
+
+def full_now(objects) -> bool:
+    """The full-score state at this step (before the 4 s hold)."""
+    _update(objects)
+    return bool(_H["full_now"])
 
 
 def score(objects):
-    """0: either rack not seated in its channel (pitch line within 1.5 mm, underside within 1.5 mm of its rail, within
-    3 degrees of level and 4 of straight), or the fingers not even (|s_near - s_far| / 2 over 2 mm: a wrong tooth is
-    4.71 mm). 1.0: seated and even, both fingers at least 15 mm open, each rack having travelled at least 15 mm apart
-    while the orange rack was untouched (so driven from the white rack or the pinion), the racks still and every
-    gripper clear (30 mm), held 4 s. 0.5: seated and even otherwise."""
+    """0: either rack not in mesh with the pinion (seated in its channel: pitch line within 1.5 mm, underside within
+    1.5 mm of its rail, within 3 degrees of level and 4 of straight; over the pinion: the pinion's axis between the
+    rack's first and last tooth; in mesh: the pin at the mesh point in a tooth gap), or the fingers not even
+    (|s_near - s_far| / 2 over 2 mm: a wrong tooth is 4.71 mm). 1.0: in mesh and even, both fingers at least 15 mm open,
+    each rack having travelled at least 15 mm apart while the orange rack was untouched (so driven from the white rack
+    or the pinion), the racks still and every gripper clear (30 mm), all of it held for the last 4 s (80 control steps,
+    counted here, so a run that ends without the hold scores 0.5). 0.5: in mesh and even otherwise."""
     _update(objects)
     sn, sf = opening(objects, "near"), opening(objects, "far")
     d = (sn - sf) / 2
-    ok = seated(objects, "near") and seated(objects, "far") and abs(d) <= SYM
-    if not ok:
+    if not _H["ok"]:
         s = 0.0
-    elif sn >= OPEN and sf >= OPEN and _H["coupled"] >= COUPLED and _H.get("speed", 1.0) < STILL and hands_clear(objects):
+    elif _H["held"] >= HOLD_STEPS:
         s = 1.0
     else:
         s = 0.5
@@ -261,19 +317,23 @@ def score(objects):
             f.write(json.dumps({
                 "step": st, "s_near_mm": round(sn * 1000, 2), "s_far_mm": round(sf * 1000, 2), "d_mm": round(d * 1000, 2),
                 "near_rel_mm": [round(float(v) * 1000, 2) for v in pn], "far_rel_mm": [round(float(v) * 1000, 2) for v in pf],
-                "seated": [seated(objects, "near"), seated(objects, "far")], "coupled_mm": round(_H["coupled"] * 1000, 2),
+                "seated": [seated(objects, "near"), seated(objects, "far")],
+                "overlap": [overlaps(objects, "near"), overlaps(objects, "far")],
+                "meshed": [meshed(objects, "near"), meshed(objects, "far")], "coupled_mm": round(_H["coupled"] * 1000, 2),
                 "far_tilt_yaw_deg": [round(math.degrees(math.acos(float(np.clip(rack_in_housing(objects, "far")[1][2, 2], -1, 1)))), 2),
                                      round(math.degrees(math.atan2(rack_in_housing(objects, "far")[1][1, 0], rack_in_housing(objects, "far")[1][0, 0])), 2)],
                 "pinion_deg": round(math.degrees(objects["housing"].q["pinion"]), 2),
                 "housing": [round(float(v), 4) for v in objects["housing"].pos],
                 "touch": {n: sorted({x for v in (objects[n].contacts or {}).values() for x in v}) for n in ("near", "far", "housing")},
                 "handled": [handled(objects, "near"), handled(objects, "far")], "clear": hands_clear(objects),
+                "full_now": _H["full_now"], "held_steps": _H["held"],
                 "hands": [[round(float(v), 4) for v in t] for t in _hands(objects)], "score": s}) + "\n")
     return s
 
 
 def success(objects):
-    return bool(score(objects) == 1.0)
+    """yam_arena ends the episode once this has held for SUCCESS_HOLD_S (4 s); score() counts the same hold itself."""
+    return full_now(objects)
 
 
 def distance(objects):
