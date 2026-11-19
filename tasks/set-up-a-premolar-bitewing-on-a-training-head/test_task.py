@@ -154,3 +154,90 @@ def test_moving_holder_is_not_settled(task):
     assert task.score(s) == 0.5
     assert run(task, s, n=19) == 0.5
     assert task.score(s) == 1.0  # still again for 20 steps
+
+
+def _local(axis, deg):
+    """A turn about the holder's own u (0), v (1) or n (2) axis."""
+    a = math.radians(deg)
+    c, s = math.cos(a), math.sin(a)
+    i, j = [(1, 2), (2, 0), (0, 1)][axis]
+    R = np.eye(3)
+    R[i, i], R[i, j], R[j, i], R[j, j] = c, -s, s, c
+    return R
+
+
+def turned(task, axis, deg, q=QB, **kw):
+    c, R = task.placed_pose(q, **kw)
+    return state(task, q=q, c=c, R=R @ _local(axis, deg))
+
+
+@pytest.mark.parametrize("deg,expect", [(5, 1.0), (15, 0.75), (25, 0.0), (90, 0.0), (-90, 0.0), (180, 0.0)])
+def test_in_plane_rotation(task, deg, expect):
+    """Turned within its own plane about the plate's centre: the tab ends up up, down or at the back for 90 and 180."""
+    s = turned(task, 2, deg)
+    assert abs(task.errors(s)["r"] - abs(deg)) < 0.5
+    assert run(task, s) == expect
+
+
+@pytest.mark.parametrize("axis,deg", [(1, 180), (0, 180), (1, 90), (0, 90)])
+def test_flipped_or_turned_holder_scores_zero(task, axis, deg):
+    """Face turned away from the teeth (about v), upside down (about u), or turned a quarter turn: no credit."""
+    assert run(task, turned(task, axis, deg)) == 0.0
+
+
+def test_wrong_orientation_gets_no_quarter_credit(task):
+    """The 0.25 tier (tab on the premolars, off position) also needs the right orientation."""
+    assert run(task, at_target(task, QB, fwd=-0.010)) == 0.25
+    for axis, deg in ((2, 90), (2, 180), (1, 180), (0, 180), (2, 30)):
+        assert run(task, turned(task, axis, deg, fwd=-0.010)) == 0.0
+
+
+def test_lingual_side_only(task):
+    """The plate on the cheek side of the teeth (buccal) gets nothing."""
+    assert run(task, at_target(task, QB, out=0.020)) == 0.0
+
+
+def test_ring_is_fixed_on_the_holder(task):
+    """In the simulation the ring is part of the holder's rigid body, 75 mm out on the beam axis: the score reads the
+    plate itself, and the ring's place on the arm cannot change."""
+    rings = [it for it in task.H.holder_items_and_start(task.TRAY_C, task.R_START)]
+    assert task.H.RING[2] <= 75.0 <= task.H.RING[3]
+    assert len(rings) > len(task.H.HOLDER_BOXES)  # the ring's segments are shapes of the same body
+
+
+def _pose_with(task, du, dv, dout, h, t, r, q=QB):
+    """The holder moved du/dv/dout (m) from the target and turned h (about the head's vertical), t (about the row)
+    and r (in its plane), degrees."""
+    c, R = task.placed_pose(q, lift=dv, fwd=du, out=dout)
+    Rn = _local(1, h) @ _local(0, -t) @ _local(2, r)  # applied in the holder's own frame
+    return state(task, q=q, c=c, R=R @ Rn)
+
+
+def test_ring_worksheet_matches_plate_scoring(task):
+    """The real-trial worksheet (bench plan angle and level-app tilt change, converted to the head's axes, then the
+    1.3 mm per degree correction of the ring's offset) against the simulator's plate-based score, over random poses.
+    Measured bounds (2,000 poses per band): full band u 0.8, v 0.7, d 0.1 mm, h 0.7, t 0.6 deg; loose band u 2.8,
+    v 1.8, d 0.4 mm, h 2.0, t 1.4 deg. The test asserts slightly wider limits."""
+    rng = np.random.default_rng(1)
+    bands = (("full", (0.004, 0.003, 0.005, 10.0), 0.0010, 0.8), ("loose", (0.008, 0.006, 0.008, 20.0), 0.0030, 2.2))
+    for band, lim, tol_m, tol_deg in bands:
+        for _ in range(300):
+            du, dv, dout = (rng.uniform(-x, x) for x in lim[:3])
+            h, t, r = (rng.uniform(-lim[3], lim[3]) for _ in range(3))
+            s = _pose_with(task, du, dv, dout, h, t, r)
+            e, w = task.errors(s), task.ring_reading(s)
+            for k in ("u", "v", "d"):
+                assert abs(e[k] - w[k]) <= tol_m, (band, k, e[k], w[k], h, t)
+            assert abs(abs(w["h"]) - e["h"]) <= tol_deg and abs(abs(w["t"]) - e["t"]) <= tol_deg, (band, w, e)
+
+
+def test_a_turn_without_the_correction_would_misread(task):
+    """Why the corrections are needed: a full-score placement turned 6 degrees moves the ring 7.8 mm along the row, and
+    the bench angles differ from the head's (the head is reclined): a pure head turn of 10 degrees reads as about 9 deg
+    in plan and 4 deg of tilt, which the conversion maps back."""
+    s = _pose_with(task, 0.0, 0.0, 0.0, 6.0, 0.0, 0.0)
+    w = task.ring_reading(s)
+    assert abs(w["u"] + 0.075 * math.sin(math.radians(w["h"])) - 0.075 * math.sin(math.radians(6.0))) < 0.0008
+    assert abs(w["u"]) < 0.0008 and run(task, s) == 1.0
+    w = task.ring_reading(_pose_with(task, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0))
+    assert 8.0 < w["plan"] < 11.0 and 2.0 < w["tilt"] < 5.0 and abs(w["h"] - 10.0) < 0.8 and abs(w["t"]) < 0.8

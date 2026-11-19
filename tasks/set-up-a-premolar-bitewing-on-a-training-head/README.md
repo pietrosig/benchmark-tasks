@@ -87,20 +87,36 @@ The target pose of the plate is defined from the lower teeth (in `head.target_fr
 - The plate is parallel to the line along the lower right premolars' lingual faces, 7 mm lingual of it.
 - Its front edge is level with the distal half of the lower right canine.
 
-The score reads the plate's pose in the lower jaw's frame: u along the row, v up from the biting plane, d the plate
-face's distance lingual of the premolars, h the horizontal angulation, t the tilt from upright.
+The score reads the plate's own pose (not the ring's) in the lower jaw's frame.
 
-- **1.0**: the plate is within 4 mm along the row, 3 mm vertically and 2 to 12 mm lingual of the premolars, with h
-  and t each 10 degrees or less. The jaw is closed on the tab (jaw angle within 3.7 degrees of shut: an incisal gap of
+Position:
+- u: along the row.
+- v: up from the biting plane.
+- d: the plate face's distance lingual of the premolars.
+
+Orientation, one angle per axis:
+- h: horizontal angulation, the face turned about the vertical. It reads 180 degrees if the face points away from the
+  teeth.
+- t: the tilt of the face from upright.
+- r: the rotation within the plate's own plane, the long edge against the row. It is 0 when the bite tab is at the
+  front on the teeth' side, and 90 or 180 degrees when the plate is turned so the tab points up, down or back.
+
+In the simulation the ring is part of the holder's rigid body, so it cannot slide on the arm. In a real trial it is
+set and checked at a mark (below).
+
+- **1.0**: the plate is within 4 mm along the row, 3 mm vertically and 2 to 12 mm lingual of the premolars, with h,
+  t and r each 10 degrees or less. The jaw is closed on the tab (jaw angle within 3.7 degrees of shut: an incisal gap of
   6 mm or less; the tab stops it at 2.25 degrees, about 4 mm). Both grippers' tool points are 3 cm or more from every
   part of the holder. The holder has been still for the last 1 s: on each of the last 20 steps (50 ms) its plate
   centre and arm end each moved under 1 mm, and it turned under 0.5 degrees.
-- **0.75**: the same, with only the loose band met (8 mm, 6 mm, 0 to 16 mm, 20 degrees). The image would be
-  readable, with overlap or a missed canine.
+- **0.75**: the same, with only the loose band met (8 mm, 6 mm, 0 to 16 mm, and h, t and r each 20 degrees or less).
+  The image would be readable, with overlap or a missed canine.
 - **0.5**: within the full-score band, but the jaw is still open or a gripper still holds the holder.
-- **0.25**: the tab rests on the lower right premolars or first molar, anywhere within 12 mm along the row and 6 mm
-  vertically, the plate upright within 20 degrees.
-- **0**: anything else, including nothing done, the left side, or the holder outside the mouth or dropped.
+- **0.25**: the tab rests on the lower right premolars or first molar: anywhere within 12 mm along the row, within
+  6 mm vertically, 0 to 20 mm lingual, and with h, t and r each 20 degrees or less. A plate turned within its plane
+  (tab up, down or back), facing away from the teeth, upside down or on the cheek side gets nothing.
+- **0**: anything else, including nothing done, the left side, a wrongly oriented holder, or the holder outside the
+  mouth or dropped. The offline tests build each of these wrong poses and check their scores.
 
 It also scores 0 for the rest of the run if a gripper's fingertips (its pad tips) pass the front of the lips into the
 mouth opening: a finger in the patient's mouth. The score is read at the end of the run; the episode
@@ -108,24 +124,95 @@ does not stop early.
 
 ### Scoring a real trial
 
-The plate is hidden in the closed mouth, but the XCP arm is rigid. So the ring's pose gives the plate's pose, and a
-ruler, a square and a photo are enough.
+The plate is hidden in the closed mouth. The XCP arm is rigid, and the ring's slide is keyed to the arm's flat leg
+and taped in place, so the ring's pose gives the plate's pose. The ring's centre sits 75 mm out along the plate's
+normal, so a turned or tilted plate also shifts the ring by about 1.3 mm per degree. The angles a person takes
+(plan angle and tilt from plumb) are bench angles, while the head is reclined. The worksheet below converts them to
+the head's axes and then corrects the ring's offset.
 
-1. **Calibrate once.** An operator places the holder by hand at the target and closes the jaw. Mount a phone on a
-   clamp tripod (for example a Joby GripTight with a bench clamp) at a marked spot on the bench edge, on the beam
-   axis 30 cm out, looking along the axis through the ring. Photograph the ring there, with a
-   printed overlay of its outline and circles offset 3, 4, 6 and 8 mm (the full and loose tolerances along the row
-   and vertically). A camera on the axis has no parallax across it. Mark on the base the line the ring's face lies
-   along (for h) and the ring face's distance from a block beside the head along the axis (for d: +/-5 mm is the
-   full band).
-2. **After a trial**, take the same phone photo, read the ring centre's offset against the circles, the ring face's
-   angle against the base line with a protractor (h), and its tilt from vertical with a square (t).
-3. **Jaw closed:** measure the incisal gap with a ruler: 6 mm or less.
-4. **Plate still in its slot:** a pen line is drawn on the plate's envelope at the slot's edge before the trial. After
-   the photo, open the jaw and check the line is still at the slot's edge (+/-1 mm), or look in with a mouth mirror.
-   A plate pushed along its slot is scored at its own measured position (the ring no longer stands for it).
-5. **Let go, still, fingers:** judged from the trial video. The holder is let go and doesn't move in the last
-   second, and no finger passes the front of the lips into the mouth.
+`task.ring_reading()` runs this worksheet in the simulator: from the ring's position, and from the ring face's
+plan angle and tilt change taken the way a person takes them. A test compares it with the simulator's plate-based
+score over 2,000 random poses per band:
+
+| Band | u | v | d | h | t |
+|---|---|---|---|---|---|
+| Full | 0.8 mm | 0.7 mm | 0.1 mm | 0.7 deg | 0.6 deg |
+| Loose | 2.8 mm | 1.8 mm | 0.4 mm | 2.0 deg | 1.4 deg |
+
+These are the largest differences found. The test asserts limits slightly wider than these.
+
+Positions below are in cm from the midpoint between the arm bases (x forward, y toward the left arm), heights above
+the bench.
+
+**Before the first trial (marks, made once):**
+1. **Ring fixed on the arm.**
+   - With a ruler, draw a fine permanent-marker line across the arm's leg 75 mm out from the plate's face.
+   - Set the ring's slide with its face edge on the line.
+   - Wrap one turn of 6 mm tape round the leg on each side of the slide, so the ring can't slide either way. It is
+     then fixed, as in the simulator.
+2. **Keyed orientation mark on the holder.** Draw a radial paint-marker tick across the ring's outer face at the end
+   of the ring's diameter that is parallel to the plate's short edge, on the plate's upper side. On a correctly
+   placed holder the tick points along the head's vertical: about 23 degrees off plumb (the head's 25-degree recline, less the closed jaw's small rotation), its top tipped toward the
+   top of the head (away from the robot), because the head is reclined.
+3. **Calibration placement.** With the jaw open, an operator places the holder by hand at the target and checks it
+   before closing the jaw:
+   - with a periodontal probe or a thin ruler, the plate face is 7 mm (+/-1) from the lingual faces of both lower
+     right premolars;
+   - the plate's front edge lines up with the distal half of the lower right canine;
+   - the tab sits flat on both premolars' cusps without rocking.
+   Then close the jaw on the tab.
+4. **Camera spot and tick line.**
+   - Mark a spot for a clamp tripod (for example a Joby GripTight on a bench-edge clamp) that holds a phone on the
+     beam axis, 30 cm out from the ring: at about x 24, y 37, 20 cm high, looking along the axis through the ring.
+     Mount the phone there only after each trial, so it never stands in the robot's way.
+   - Stick a small printed crosshair on the mask's cheek where the beam axis meets it, seen through the ring's
+     opening, with one line drawn along the ring's tick: the tick line.
+5. **Overlay.** Photograph the calibrated set-up and print an overlay of it with two rectangles centred on the
+   crosshair: 4 x 3 mm and 8 x 6 mm, the long side along the row and the short side along the tick line. Also draw
+   10 and 20 degree wedges either side of the tick line. A camera on the axis has no parallax across it.
+6. **Base marks.**
+   - Stand a 20 x 20 x 100 mm block on the bench just below the ring's outer face, below the camera's line of sight,
+     with its face square to the beam axis, and mark its place.
+   - Note the ring face's distance from the block along the axis.
+   - Like the phone, the block is put at its mark only after a trial and removed before the next. During a trial
+     nothing but the head, tray and holder is on the bench.
+   - Mark on the head's clamp plate the line the ring face lies along in plan.
+   - Record the ring face's tilt from plumb with a protractor or a phone level app. At the target it is about
+     7 degrees, its top leaning toward the face.
+
+**After each trial (the worksheet):**
+1. **Ring check:** check the ring is still at its marker line between its two tape stops.
+2. **Angles.** Read two bench angles of the ring face against the calibration marks:
+   - **plan:** its angle against the base line in plan, with a protractor. It is + when the ring has turned to face
+     more toward the robot, i.e. its front edge (toward the mouth's front) has swung toward the face.
+   - **tilt change:** its tilt from plumb (protractor or phone level app) minus the tilt recorded at calibration
+     (about 7 degrees). It is + when its top leans further toward the face.
+   - **Convert to the head's axes** (about 24 degrees apart: the head's 25-degree recline, less the closed jaw's small
+     rotation):
+     - h = 0.9 x plan + 0.4 x tilt change
+     - t = 0.9 x tilt change - 0.4 x plan
+     The exact coefficients, used in the simulator, are 0.906 / 0.406 and 0.914 / -0.403.
+   - **r:** the tick's angle against the tick line, read on the phone photo with the overlay's wedges.
+   - h, t and r must each be 10 degrees or less (ignoring sign) for full score, 20 or less for the loose band. A tab
+     turned up, down or back puts the tick 90 or 180 degrees off, and the score is 0.
+3. **Position:** put the phone at its spot and take the photo. Read the ring centre's offset from the crosshair:
+   along the row (+ toward the mouth's front) and along the tick line (+ toward the top of the head). Then:
+   - u = offset along the row - 1.3 mm x h
+   - v = offset along the tick line - 1.3 mm x t
+   - Compare with 4 x 3 mm (full) and 8 x 6 mm (loose). These are the overlay rectangles when h and t are both 0.
+4. **Depth:** put the block at its mark. With the ruler, measure how much farther out from the cheek the ring face
+   is than at calibration (negative if nearer), then:
+   - d = 7 mm - that difference - 0.0114 mm x (h^2 + t^2) (h and t in degrees).
+   - Full band 2 to 12 mm, loose 0 to 16 mm.
+   - **Measurement uncertainty:** the worksheet differs from the plate-based score by up to 0.8 mm / 0.7 deg in the
+     full band and 2.8 mm / 2 deg in the loose band, plus about +-1 deg and +-0.5 mm of reading. A reading within that
+     of a band edge is measured twice and the average scored.
+5. **Jaw closed:** measure the incisal gap with a ruler: 6 mm or less.
+6. **Plate still in its slot:** a pen line is drawn on the plate's envelope at the slot's edge before the trial.
+   After the photos, open the jaw and check the line is still at the slot's edge (+/-1 mm), or look in with a mouth
+   mirror. A plate pushed along its slot is scored at its own measured position (the ring no longer stands for it).
+7. **Let go, still, fingers:** judged from the trial video. The holder is let go and doesn't move in the last second,
+   and no finger passes the front of the lips into the mouth.
 
 ## Scripted demo
 
@@ -154,8 +241,8 @@ Rigid-body simulation (PhysX, 240 Hz physics, 20 Hz control).
 
 | Run | Score (task_score) | What happened |
 |---|---|---|
-| Scripted demo (`yam_scripted`, seed 0) | 1.0 | At the end: plate 0.4 mm back along the row, 0.1 mm low and 5.7 mm lingual of the premolars; horizontal angulation 0.0 deg, tilt 1.6 deg; jaw closed on the tab (2.2 deg, incisal gap about 4 mm); both hands parked; holder still; no fingertip past the lips. 48 s. |
-| Dream-1 (seed 0, 1,800 steps) | 0.0 | The left arm (on the left of the video) moved over the holder on the tray from about 10 s to the end. At 70 s its fingers came within 4 mm, and it nudged the holder 0.5 mm, but it never lifted it. The right arm stayed near its base, and the jaw stayed open. |
+| Scripted demo (`yam_scripted`, seed 0) | 1.0 | At the end: plate 0.4 mm back along the row, 0.1 mm low and 5.7 mm lingual of the premolars; horizontal angulation 0.0 deg, tilt 1.6 deg, in-plane rotation 0.7 deg; jaw closed on the tab (2.2 deg, incisal gap about 4 mm); both hands parked; holder still; no fingertip past the lips. 48 s. |
+| Dream-1 (seed 0, 1,800 steps; re-scored offline with the current scorer, which only added the orientation checks) | 0.0 | The left arm (on the left of the video) moved over the holder on the tray from about 10 s to the end. At 70 s its fingers came within 4 mm, and it nudged the holder 0.5 mm, but it never lifted it. The right arm stayed near its base, and the jaw stayed open. |
 
 The demo was run on seed 0. Seeds 1 and 2 only move the tray and holder 1 and 2 cm along x; their reach is checked offline
 in `test_task.py`.

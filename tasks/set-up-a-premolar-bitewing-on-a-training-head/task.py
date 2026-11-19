@@ -67,8 +67,8 @@ HOLDER = fixture("holder", (P_START[0], P_START[1], TOP + P_START[2]), H.holder_
 OBJECTS = [HEAD, TRAY, HOLDER]
 
 # -- scoring ----------------------------------------------------------------------------------------------------------
-TOL_FULL = dict(u=0.004, v=0.003, d=(0.002, 0.012), h=10.0, t=10.0)
-TOL_LOOSE = dict(u=0.008, v=0.006, d=(0.000, 0.016), h=20.0, t=20.0)
+TOL_FULL = dict(u=0.004, v=0.003, d=(0.002, 0.012), h=10.0, t=10.0, r=10.0)
+TOL_LOOSE = dict(u=0.008, v=0.006, d=(0.000, 0.016), h=20.0, t=20.0, r=20.0)
 BITTEN_Q = -0.065  # jaw angle (rad) above which the jaw counts as closed on the tab: incisal gap 6 mm or less
 CLEAR_M = 0.030  # let go: both tool points at least this far from every part of the holder
 LIP_X = H.XI - 0.014  # the mask's lip line (front of the lips)
@@ -94,32 +94,83 @@ def jaw_q(objects) -> float:
     return float(objects["head"].q["jaw"])
 
 
+def _angle(a, b) -> float:
+    """Angle between two vectors, degrees (0..180)."""
+    c = float(a @ b) / max(float(np.linalg.norm(a) * np.linalg.norm(b)), 1e-12)
+    return math.degrees(math.acos(max(-1.0, min(1.0, c))))
+
+
 def errors(objects) -> dict:
-    """The plate's pose in the lower jaw's frame against the target: along the row (u), vertical (v), its distance
-    lingual of the premolars' lingual faces (d), horizontal angulation (h, deg) and tilt from upright (t, deg)."""
+    """The plate's pose in the lower jaw's frame against the target. Position: along the row (u), vertical (v), and its
+    distance lingual of the premolars' lingual faces (d). Orientation, in degrees, one angle per axis:
+    h, horizontal angulation (the face normal turned about the vertical; 180 if it faces away from the teeth);
+    t, tilt of the face from upright (about the row); r, rotation within the plate's own plane (about its normal): the
+    plate's long edge against the row, 0 when the bite tab is at the front, on the teeth' side, 90 or 180 when the plate
+    is turned so the tab points up, down or back."""
     p, R = holder_pose(objects)
     Rj = H.jaw_rot(jaw_q(objects))
     pj = H.HINGE + Rj.T @ (p - H.HINGE)
     Rjh = Rj.T @ R
     e = pj - C_T
-    n = Rjh[:, 2]
+    u, n = Rjh[:, 0], Rjh[:, 2]
     nh = n - V_T * (n @ V_T)
-    h = math.degrees(math.atan2(abs(float(nh @ U_T)), max(float(nh @ N_T), 1e-9))) if np.linalg.norm(nh) > 1e-9 else 90.0
-    if nh @ N_T <= 0:
-        h = 180.0 - h
+    h = _angle(nh, N_T) if np.linalg.norm(nh) > 1e-9 else 90.0
     t = math.degrees(math.asin(min(1.0, abs(float(n @ V_T)))))
-    return {"u": float(e @ U_T), "v": float(e @ V_T), "d": H.D_TARGET - float(e @ N_T), "h": h, "t": t}
+    up = U_T - n * float(U_T @ n)  # the row's direction laid into the plate's plane
+    r = _angle(u, up) if np.linalg.norm(up) > 1e-9 else 90.0
+    return {"u": float(e @ U_T), "v": float(e @ V_T), "d": H.D_TARGET - float(e @ N_T), "h": h, "t": t, "r": r}
+
+
+RING_OUT = H.RING[2] / 1000.0 + (H.RING[3] - H.RING[2]) / 2000.0  # 75 mm: the ring's centre out along the plate normal
+
+
+TO_HEAD = np.array([[0.906, 0.406], [-0.403, 0.914]])  # bench (plan, tilt change) -> head's (h, t); see ring_reading
+
+
+def _plan(v) -> float:
+    return math.atan2(float(v[1]), float(v[0]))
+
+
+def ring_reading(objects) -> dict:
+    """The real-trial worksheet, computed from the RING and from angles taken the way a person takes them (README
+    "After each trial").
+
+    A person measures two bench angles of the ring face against its calibration marks: its plan angle against the
+    base line (protractor; + when the ring has turned to face more toward the robot, i.e. its front edge swung toward
+    the face) and its tilt from plumb minus the tilt recorded at calibration (level app; + when its top leans further
+    toward the face). The head is reclined, so these are converted to the head's axes:
+    h = 0.906 x plan + 0.406 x tilt change, t = -0.403 x plan + 0.914 x tilt change (worksheet: 0.9 and 0.4).
+    The ring centre's offset from its calibrated place (along the row and along the tick line, read on the photo, and
+    out from the cheek along the beam axis) is then corrected for the turn, because the ring sits 75 mm out along the
+    plate normal: u = offset along the row - 75 mm x sin h (about 1.3 mm per degree), v = offset along the tick line -
+    75 mm x sin t, d = 7 mm - outward shift - 0.0114 mm x (h^2 + t^2) [degrees]. The calibration reference is the
+    target's normal at the current jaw angle."""
+    p, R = holder_pose(objects)
+    Rj = H.jaw_rot(jaw_q(objects))
+    ring = H.HINGE + Rj.T @ (p + R[:, 2] * RING_OUT - H.HINGE)  # the ring's centre in the jaw's frame
+    off = ring - (C_T + N_T * RING_OUT)
+    n_w, ref_w = R[:, 2], Rj @ N_T  # bench coordinates: the ring face's normal and its calibrated direction
+    plan = math.degrees(_plan(n_w) - _plan(ref_w))
+    plan = (plan + 180.0) % 360.0 - 180.0
+    tilt = math.degrees(math.asin(max(-1.0, min(1.0, float(n_w[2])))) - math.asin(max(-1.0, min(1.0, float(ref_w[2])))))
+    h, t = (float(x) for x in TO_HEAD @ np.array([plan, tilt]))
+    u = float(off @ U_T) - RING_OUT * math.sin(math.radians(h))
+    v = float(off @ V_T) - RING_OUT * math.sin(math.radians(t))
+    d = H.D_TARGET - float(off @ N_T) - 0.0114e-3 * (h * h + t * t)
+    return {"u": u, "v": v, "d": d, "h": h, "t": t, "plan": plan, "tilt": tilt}
 
 
 def within(e, tol) -> bool:
     return (abs(e["u"]) <= tol["u"] and abs(e["v"]) <= tol["v"] and tol["d"][0] <= e["d"] <= tol["d"][1]
-            and e["h"] <= tol["h"] and e["t"] <= tol["t"])
+            and e["h"] <= tol["h"] and e["t"] <= tol["t"] and e["r"] <= tol["r"])
 
 
 def on_premolars(e) -> bool:
-    """The tab rests on the lower right premolars or first molar: plate upright, centred on the row within 12 mm
-    along it, at tab height, lingual of the teeth."""
-    return -0.012 <= e["u"] <= 0.012 and abs(e["v"]) <= 0.006 and 0.0 <= e["d"] <= 0.020 and e["t"] <= 20.0
+    """The tab rests on the lower right premolars or first molar: centred on the row within 12 mm along it, at tab
+    height, lingual of the teeth, and oriented within the loose band (h, t and r each 20 degrees or less), so the tab is
+    on the teeth' side, not turned up, down or back."""
+    return (-0.012 <= e["u"] <= 0.012 and abs(e["v"]) <= 0.006 and 0.0 <= e["d"] <= 0.020
+            and e["h"] <= 20.0 and e["t"] <= 20.0 and e["r"] <= 20.0)
 
 
 def _box_dist(p, lo, hi):
@@ -184,7 +235,9 @@ def _score(objects):
     """0 for the rest of the run once a gripper's fingertips pass the front of the lips into the mouth. Otherwise, at the
     end: 1.0 plate within the full tolerance, jaw closed on the tab, both grippers 3 cm clear, all still for 1 s;
     0.75 the same within the loose tolerance; 0.5 within the full tolerance but the jaw open or a gripper on the
-    holder; 0.25 the tab resting on the lower right premolars, plate upright; 0 otherwise."""
+    holder; 0.25 the tab resting on the lower right premolars, the holder oriented within 20 degrees on all three axes
+    (so a plate turned within its plane, facing away or upside down gets nothing); 0 otherwise. Tolerances: TOL_FULL,
+    TOL_LOOSE (u, v, d in m; h, t, r in degrees, see errors())."""
     _update(objects)
     _trace(objects)
     if _st["lip"]:
@@ -217,7 +270,7 @@ def _trace(objects) -> None:
         f.write(json.dumps({
             "call": _st["calls"], "jaw_deg": round(math.degrees(jaw_q(objects)), 2),
             "err_mm": {k: round(v * 1000, 1) for k, v in e.items() if k in "uvd"},
-            "ang_deg": {"h": round(e["h"], 1), "t": round(e["t"], 1)},
+            "ang_deg": {"h": round(e["h"], 1), "t": round(e["t"], 1), "r": round(e["r"], 1)},
             "bitten": bitten(objects), "released": released(objects), "still_n": _st["still_n"], "lip": _st["lip"],
             "plate_mm": [round(float(v) * 1000, 1) for v in holder_pose(objects)[0]],
             "hq": [round(float(v), 4) for v in objects["holder"].quat_xyzw],
