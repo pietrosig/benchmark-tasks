@@ -103,8 +103,64 @@ def test_knife_point_down_in_another_cell_counts():
     assert run([scene(knife=in_cell("knife", OPEN_C))]) == 1.0
 
 
-def test_knife_point_down_leaning_20_degrees_counts():
-    assert run([scene(knife=in_cell("knife", OPEN_C, tilt=20.0))]) == 1.0
+def test_seated_knife_is_full_and_its_whole_edge_is_below_the_lid():
+    k = in_cell("knife", OPEN_M)
+    butt, point = T.ends("knife", k)
+    assert T.seated(k)
+    assert T.heel(k)[2] < T.LID_UNDER
+    assert butt[2] - T.LID_Z <= T.HANDLE_ABOVE_MAX
+
+
+def _upright_with_butt_at(above_lid, tilt=0.0):
+    """Upright point down in the demo's cell, lowered so the handle's end is ``above_lid`` over the lid's top."""
+    k = in_cell("knife", OPEN_M, tilt=tilt)
+    butt, _ = T.ends("knife", k)
+    return in_cell("knife", OPEN_M, tilt=tilt, z_low=T.B_FLOOR + 0.001 + (T.LID_Z + above_lid - butt[2]))
+
+
+def test_handle_95_mm_boundary():
+    assert run([scene(knife=_upright_with_butt_at(0.0945))]) == 1.0
+    T.reset_credit()
+    assert run([scene(knife=_upright_with_butt_at(0.0955))]) == 0.25
+
+
+def test_tilt_20_with_the_point_20_mm_up_is_partial():
+    k = in_cell("knife", OPEN_M, tilt=20.0, z_low=T.B_FLOOR + 0.020)
+    assert run([scene(knife=k)] * 6) == 0.25
+
+
+def test_tilt_21_degrees_seated_is_partial():
+    k = in_cell("knife", OPEN_M, tilt=21.0)
+    assert not T.seated(k)
+    assert run([scene(knife=k)] * 6) == 0.25
+
+
+def test_rule_implies_edge_below_lid_over_a_sweep():
+    # every released pose the rule accepts has its heel, plus the 8 mm edge corner at tilt, below the lid's underside
+    import math
+    for tilt in range(0, 21, 2):
+        for dz in range(0, 40, 2):
+            k = in_cell("knife", OPEN_M, tilt=float(tilt), z_low=T.B_FLOOR + 0.001 + dz / 1000)
+            if T.seated(k):
+                corner = T.heel(k)[2] + 0.008 * math.sin(math.radians(tilt))
+                assert corner < T.LID_UNDER
+
+
+@pytest.mark.parametrize("below_lid", [0.010, 0.020, 0.030])
+def test_caught_partway_point_down_with_edge_exposed_is_not_full(below_lid):
+    k = in_cell("knife", OPEN_M, z_low=T.LID_Z - below_lid)
+    assert not T.seated(k) and T.heel(k)[2] > T.LID_UNDER
+    assert run([scene(knife=k)] * 6) == 0.25
+
+
+def test_hung_in_the_opening_halfway_is_not_full():
+    k = in_cell("knife", OPEN_M, z_low=T.B_FLOOR + 0.040)
+    assert not T.seated(k)
+    assert run([scene(knife=k)] * 6) == 0.25
+
+
+def test_knife_point_down_leaning_6_degrees_counts():
+    assert run([scene(knife=in_cell("knife", OPEN_C, tilt=6.0))]) == 1.0
 
 
 def test_knife_point_up_in_a_cell_is_zero():
@@ -198,6 +254,10 @@ def test_bypass_5_dropped_off_the_bench_then_put_back_is_zero():
 
 def test_bypass_5b_dropped_on_the_bench_and_picked_up_again_is_fine():
     assert run([scene(knife=obj((0.10, 0.20, T.TOP + 0.007))), hung()]) == 1.0
+
+
+def test_seated_then_pulled_up_partway_is_not_full():
+    assert run([hung()] * 3 + [scene(knife=in_cell("knife", OPEN_M, z_low=T.LID_Z - 0.02))] * 3) == 0.25
 
 
 def test_bypass_6_proximity_is_not_loading():

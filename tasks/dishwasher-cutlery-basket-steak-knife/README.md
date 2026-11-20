@@ -20,9 +20,10 @@ spoon bowl down.
 
 **The physical work.**
 - The knife lies flat, so it has to be pinched by its handle, lifted and turned upright on the way to the basket.
-- It then goes down through the basket's grid lid, which has one 42 x 24 mm opening over each cell. The 227 mm knife,
-  its handle 14 mm thick, has to come from flat on the board to within about 25 degrees of upright to pass the 24 mm
-  width into the 120 mm-deep cell.
+- It then goes down through the basket's grid lid, which has one 42 x 24 mm opening over each cell. The 220 mm knife
+  (110 mm blade) has to come from flat on the board to within about 25 degrees of upright to pass the 24 mm width,
+  and then down into the 125 mm-deep cell until its handle stands at most 95 mm above the lid. At that point its whole
+  cutting edge is below the lid.
 - The knife goes through an opening either way round. Handle down leaves it point up, and the scorer gives 0 for
   that.
 
@@ -59,9 +60,20 @@ trial video or the side photo (a protractor on a still if in doubt).
 - At the end, a gripper is within 5 cm of the knife.
 
 **Otherwise, the score depends on where the knife ends up:**
-- **1.0:** in a basket cell, point down. Its point is inside the basket below the lid, and the knife is within 45
-  degrees of upright.
-- **0.25:** lying on the basket's lid (within 30 degrees of level), point not up.
+- **1.0:** all four of these hold. The simulation scorer uses the same rule.
+  - The knife is released, point down in one cell.
+  - It is within 20 degrees of upright (protractor on the side photo, as for "point up").
+  - The handle's end is at most 95 mm above the lid's top face (ruler).
+  - The point and the handle's end are over the same cell.
+- **Why that rule keeps the blade enclosed:** the heel (where the edge meets the bolster) is 110 mm from the handle's
+  end. So when the rule holds, the heel's edge corner is at least 2.6 mm below the lid's underside at a 20-degree tilt,
+  and 12 mm below it upright (worked out in `heel()` in `task.py`). An upright knife resting on the cell floor has its
+  handle 92 mm above the lid, so the rule can be met.
+- **0.25:** the knife is point down in a cell but does not meet the 1.0 rule (caught or hung in the opening, with part
+  of its edge above the lid). Or it lies on the basket's lid (within 30 degrees of level). Either way, its point is not
+  up.
+  - Why 0.25 and not 0: neither state is finished. Both leave the edge exposed to the next hand, but neither is the
+    point-up hazard the task tests, so both get the same small credit.
 - **0:** anywhere else: left on the board, loose in the rack, or wedged across a cell.
 
 ## Demo
@@ -77,16 +89,16 @@ calibrated from earlier runs' traces.
 At that height over the basket the arm stops about 35 mm short of the commanded position, so the command aims 29 mm
 past the opening's centre (`AIM_KNIFE_DX`).
 
-Result: 1.0 (the knife through the front middle cell's opening, point on the cell floor, 4 degrees from upright; success at step 330 of 1,200). Dream-1: 0.0 (both grippers closed early and hovered about 20 cm up; nothing was touched).
+Result: 1.0 (the knife seated in the front middle cell: 4 degrees from upright, the handle's end 92 mm above the lid's top, the blade's heel 15 mm below the lid's underside; success at step 330 of 1,200). Dream-1: 0.0 (both grippers closed early and hovered 17-28 cm up; nothing was touched).
 
 ## Real setup
 
 | Item | Product (or equivalent) | Notes |
 |---|---|---|
 | Lower rack | Bosch 00249276 lower dishrack (PartSelect PS8701740), or the lower rack of any compact dishwasher | stands on a 20 mm board standing in for the open door's inner panel |
-| Cutlery basket | Bosch 00668361 lower-rack cutlery basket with its grid lid (cross-ref AP4483472), or any lidded basket | the sim's lid openings (42 x 24 mm over each cell) should match the named basket's own: fit-check them before the trials |
+| Cutlery basket | Bosch 00668361 lower-rack cutlery basket with its grid lid (cross-ref AP4483472), or any lidded basket | fit-check before the trials. The lid openings (sim: 42 x 24 mm over each cell) and the cell depth (sim: 125 mm, floor to lid underside) must take this 220 mm knife with its handle at most 95 mm above the lid when it rests point down. No published dimensions were found for 00668361; typical Bosch cutlery baskets are about 8 in tall, so the 125 mm depth is usually met |
 | Cutlery already in the basket | a stainless table fork and two table spoons | fork tines up, one spoon each way |
-| Steak knife | a one-piece stainless steel steak knife its maker lists as dishwasher-safe (not wooden handles), about 23 cm | **for operator safety: edge dulled on a coarse stone and tip rounded to about 1 mm radius, still visibly pointed**; a cork on the point between trials |
+| Steak knife | Arcos Monoblock steak knife, ref. 375500: one-piece stainless steel, serrated, pointed, dishwasher safe; 110 mm blade, 220 mm overall (Arcos product page, https://www.arcos.com/en-eu/products/steak-knife-375500); measure it before the trials: the 95 mm limit assumes 110 mm from the handle's end to the blade's heel; for another knife use that length minus 15 mm | **for operator safety: edge dulled on a coarse stone and tip rounded to about 1 mm radius, still visibly pointed**; a cork on the point between trials |
 | Cutting board | wooden board, 300 x 200 x 15 mm | knife outline taped for reset |
 
 ## Sources
