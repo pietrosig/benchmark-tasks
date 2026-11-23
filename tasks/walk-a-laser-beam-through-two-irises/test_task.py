@@ -99,3 +99,59 @@ def test_demo_undoes_the_start():
     for name in task.KNOB_NAMES:
         total[name] = task.START_TURNS[name]
     assert all(abs(v) >= 0.3 for v in total.values())
+
+
+def test_far_spot_and_meter_dark_when_near_aperture_blocks():
+    # every seeded start: the beam lands on aperture 1's plate off the hole, so no light reaches aperture 2 or the
+    # photodiode: the far spot is hidden (pushed into its plate, centred), the meter reads 0, the near spot is drawn
+    for s, off in enumerate(task.OFFSETS):
+        q = {k: 2 * math.pi * t for k, t in zip(task.KNOB_NAMES, off)}
+        b = task.beam(q)
+        assert b["r1"] > task.R_PASS and b["t1"] == 0.0 and b["power"] == 0.0, s
+        t = task.spot_targets(q)
+        assert t["s2_x"] == task.SPOT_HIDE and t["s2_y"] == 0.0 and t["s2_z"] == 0.0, s
+        assert t["s1_x"] == 0.0 and t["bar"] == 0.0, s
+
+
+def test_clipping_is_consistent_between_meter_and_spots():
+    # sweep one knob through and past alignment: the far spot is drawn exactly when light passes aperture 1, the meter
+    # reads the product of the two apertures' transmissions, and is 0 whenever the far spot is hidden
+    seen = set()
+    for t in np.linspace(-0.6, 0.6, 241):
+        q = {**{k: 0.0 for k in task.KNOB_NAMES}, "m1_up": 2 * math.pi * t}
+        b = task.beam(q)
+        tg = task.spot_targets(q)
+        passes = b["r1"] <= task.R_PASS
+        seen.add(passes)
+        assert (tg["s2_x"] == 0.0) == passes
+        if passes:
+            assert b["power"] == pytest.approx(math.exp(-2 * (b["r1"] ** 2 + b["r2"] ** 2) / task.W_EFF ** 2))
+        else:
+            assert b["power"] == 0.0 and tg["bar"] == 0.0
+    assert seen == {True, False}
+
+
+def test_knob_ticks_do_not_mark_the_aligned_setting():
+    # the drawn tick on each knob sits at a random angle per seed and knob: it does not mark the aligned setting
+    # (aligned = joint angle 0, where the tick shows at its drawn phase) in any consistent way across seeds
+    import importlib
+    phases = []
+    for seed in range(20):
+        os.environ["TASK_SEED"] = str(seed)
+        phases.append(importlib.reload(task).MARK_PHASE)
+    os.environ.pop("TASK_SEED")
+    importlib.reload(task)
+    for k in task.KNOB_NAMES:
+        a = np.array([p[k] for p in phases])
+        assert np.ptp(np.mod(a, 2 * math.pi)) > math.pi, k  # spread round the knob
+        assert abs(np.mean(np.exp(1j * a))) < 0.6, k  # no preferred angle
+
+
+def test_display_parts_start_at_their_targets():
+    # the first frame already shows the start state: far spot hidden, near spot off the hole, meter at 0
+    import beamkit
+    want = task.spot_targets({k: 2 * math.pi * t for k, t in task.START_TURNS.items()})
+    for part, v in want.items():
+        assert beamkit._START[("bench", part)] == pytest.approx(v), part
+    assert want["s2_x"] == task.SPOT_HIDE and want["s1_x"] == 0.0 and want["bar"] == 0.0
+    assert math.hypot(want["s1_y"], want["s1_z"]) > task.R_PASS

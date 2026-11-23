@@ -1,21 +1,22 @@
-"""A free-space laser beam on an optical bench has drifted off its two alignment irises, and the robot walks it back.
+"""A free-space laser beam on an optical bench has drifted off its two alignment apertures, and the robot walks it back.
 
-On an aluminium plate, 20 cm above the bench top: a collimated Class 2 (under 1 mW) 650 nm dot laser module fires toward the
-robot onto mirror M1 (left), which folds the beam across to mirror M2 (right), which sends it away from the robot through
-two irises closed to their 0.8 mm minimum, 12 and 24 cm beyond M2, onto a photodiode whose photocurrent a multimeter
-reads. Each mirror sits in a kinematic mount (Thorlabs
-KM100) with two 1/4-80 adjuster knobs on its back, toward the robot: the upper knob tips the mirror up and down, the
-lower one turns it left and right. Every knob has been turned off its aligned setting (a seeded draw), so the beam misses
-the first iris and the meter reads about zero.
+On a board clamped to the bench, 20 cm above the bench top: a collimated Class 2 (1 mW) 650 nm dot laser module fires
+toward the robot onto mirror M1 (left), which folds the beam across to mirror M2 (right), which sends it away from the
+robot through two alignment apertures (0.8 mm pinholes), 12 and 24 cm beyond M2, onto a photodiode whose photocurrent a
+multimeter reads. Each mirror sits in a kinematic mount (Thorlabs KM100) with two 1/4-80 adjuster knobs on its back,
+toward the robot: the upper knob tips the mirror up and down, the lower one turns it left and right. Every knob has been
+turned off its aligned setting (a seeded draw), so the beam misses the first aperture and the meter reads about zero.
+The knobs carry no mark of the aligned setting: the robot can only find it from the beam and the meter.
 
-The ability tested is beam walking: two mirrors, four coupled adjusters, two irises. M1 mainly moves the spot on the
-near iris and M2 the angle onto the far one, but each knob moves both, so the robot must alternate. Each knob is
+The ability tested is beam walking: two mirrors, four coupled adjusters, two apertures. M1 mainly moves the spot on the
+near aperture and M2 the angle onto the far one, but each knob moves both, so the robot must alternate. Each knob is
 gripped from behind and turned in fractions of a turn (one turn tilts the mirror 8 mrad: the beam moves about 4 mm per
-turn at the far iris), with the mounts left undisturbed.
+turn at the far aperture), with the mounts left undisturbed.
 
 The beam is not simulated as light: its path is ray-traced every step from the four knob angles (exact reflection off
-each mirror's plane), and the photodiode's reading is the Gaussian beam's transmission through both irises, relative
-to the aligned reference. The knobs are real revolute joints with friction that the grippers turn.
+each mirror's plane), and the photodiode's reading is the Gaussian beam's transmission through both apertures,
+relative to the aligned reference. The beam is clipped at the first aperture: when it misses it, nothing reaches the
+second aperture or the photodiode (no spot drawn there, meter at 0). The knobs are real revolute joints with friction that the grippers turn.
 
 Run it:  inspect-robots run --embodiment yam_arena -E task=task.py --instruction "$(cat instruction.txt)" \\
            --scorer task_score -E object_jitter=0 -E control_hz=20 -E cam_width=1280 -E cam_height=704 --max-steps 3000
@@ -49,9 +50,10 @@ def _env(name, default):
 
 
 # -- colours --------------------------------------------------------------------------------------------------------------
-BLACK, DARK, ALU, STEEL, GOLD, RED, MIRROR, YELLOW, GREEN, WHITE = (
+BLACK, DARK, ALU, STEEL, GOLD, RED, MIRROR, YELLOW, GREEN, WHITE, GREY, METER_RED = (
     (0.05, 0.05, 0.06), (0.14, 0.14, 0.16), (0.55, 0.57, 0.60), (0.70, 0.72, 0.75), (0.80, 0.62, 0.25),
-    (1.0, 0.05, 0.03), (0.86, 0.88, 0.92), (0.95, 0.78, 0.10), (0.15, 0.85, 0.20), (0.93, 0.93, 0.91))
+    (1.0, 0.05, 0.03), (0.86, 0.88, 0.92), (0.95, 0.78, 0.10), (0.15, 0.85, 0.20), (0.93, 0.93, 0.91),
+    (0.62, 0.63, 0.65), (0.72, 0.12, 0.10))
 VB = {"collide": False}
 CYL_X = {"shape": "cyl", "axis": "X"}
 CYL_Z = {"shape": "cyl", "axis": "Z"}
@@ -61,7 +63,7 @@ HB = 0.20  # beam height
 LASER = np.array([0.56, 0.11, HB])  # the laser's exit aperture; it fires along -x
 M1 = np.array([0.28, 0.11, HB])  # mirror centres (front surface)
 M2 = np.array([0.28, -0.11, HB])
-A1 = np.array([0.40, -0.11, HB])  # iris centres (their faces toward M2)
+A1 = np.array([0.40, -0.11, HB])  # aperture centres (the hole, on the plate face toward M2)
 A2 = np.array([0.52, -0.11, HB])
 DET = np.array([0.555, -0.11, HB])
 YAW1, YAW2 = -math.pi / 4, math.pi / 4  # each mount's yaw: its local +x is the mirror's normal (front)
@@ -81,77 +83,97 @@ MOUNT_BOXES = (
     ((-0.026, -KNOB_OFF, -KNOB_OFF), (0.004, 0.0064, 0.0064), STEEL, CYL_X),
 )
 POST_TOP = -0.019  # the post meets the mount's underside
+BOARD_T = 0.0127  # the 1/2 in plywood board under everything
+HOLDER_H, HOLDER_D = 0.076, 0.025  # Thorlabs PH3 post holder: 3 in tall, about 25 mm across
 
 
 def _mount_part(name, centre, yaw):
-    """The mount on its post, as a part turned ``yaw`` about the vertical (held in place by a stiff, fixed joint)."""
-    post_len = HB + POST_TOP
+    """The mount on its Ø1/2 in post in a post holder screwed to the board, as a part turned ``yaw`` about the vertical
+    (held in place by a stiff, fixed joint)."""
+    h_bot = -HB + BOARD_T  # the board's top, in the mount's frame
+    h_top = h_bot + HOLDER_H
     boxes = MOUNT_BOXES + (
-        ((-0.010, 0, POST_TOP - (post_len - 0.0127) / 2), (0.0254, 0.0254, post_len - 0.0127), STEEL, CYL_Z),  # Ø1 in pedestal post
-        ((-0.010, 0, -HB + 0.0127 + 0.004), (0.020, 0.050, 0.008), BLACK),  # clamping fork, bolted to the board
+        ((-0.010, 0, (POST_TOP + h_top) / 2), (0.0127, 0.0127, POST_TOP - h_top), STEEL, CYL_Z),  # Ø1/2 in post (TR6)
+        ((-0.010, 0, (h_bot + h_top) / 2), (HOLDER_D, HOLDER_D, HOLDER_H), BLACK, CYL_Z),  # post holder (PH3)
     )
     return Slider(name, tuple(centre), "Z", boxes, -1e-5, 1e-5, kind="revolute", yaw=yaw, stiffness=1e4, damping=50.0,
                   mass=0.3, gravity=False)
 
 
+SEED = _env("TASK_SEED", 0) % 20
+# The real knobs are unmarked. The simulation draws a small grey tick on each knob only so its turning shows in the video;
+# it sits at a random angle drawn per seed and knob, unrelated to the aligned setting, so it gives nothing away.
+MARK_PHASE = {f"{m}_{k}": float(a) for (m, k), a in
+              zip([(m, k) for m in ("m1", "m2") for k in ("up", "side")], np.random.default_rng(7000 + SEED).uniform(0, 2 * math.pi, 4))}
+
+
 def _knob_part(mount, key):
     y, z = KNOBS[key]
+    a, r = MARK_PHASE[f"{mount}_{key}"], KNOB_D / 2 - 0.0005
     boxes = (((0, 0, 0), (KNOB_L, KNOB_D, KNOB_D), DARK, CYL_X),
-             ((0.0, 0, KNOB_D / 2 - 0.001), (KNOB_L, 0.002, 0.002), WHITE, VB))  # an index line, to see it turn
+             ((0.0, r * math.sin(a), r * math.cos(a)), (KNOB_L * 0.6, 0.0016, 0.0016), GREY, VB))  # turn tick (random angle)
     return Slider(f"{mount}_{key}", (KNOB_X, y, z), "X", boxes, -40.0, 40.0, kind="revolute", parent=mount,
                   stiffness=0.0, damping=0.002, friction=KNOB_FRICTION, mass=0.01, gravity=False)
 
 
 # -- spots and meter: display parts, their targets computed from the beam each step (no collision) ----------------------
 SPOT = ((0, 0, 0), (0.001, 0.006, 0.006), RED, {**CYL_X, "collide": False})  # drawn larger than the beam, to be seen
+PLATE_W, PLATE_T = 0.040, 0.003  # each aperture: a 40 x 40 x 3 mm white plate, its face toward M2
+SPOT_HIDE = 0.0025  # a hidden spot is pushed this far back, inside its aperture plate (no light reaches it)
 
 
 def _spot_parts(tag, base):
-    y = Slider(f"{tag}_y", tuple(base), "Y", (), -0.025, 0.025, stiffness=2000.0, damping=40.0, mass=0.002,
+    """The spot on an aperture's face: x pushes it into the plate (hidden), y and z place it."""
+    x = Slider(f"{tag}_x", tuple(base), "X", (), 0.0, SPOT_HIDE, stiffness=2000.0, damping=40.0, mass=0.002,
                gravity=False, computed=True)
+    y = Slider(f"{tag}_y", (0, 0, 0), "Y", (), -0.025, 0.025, parent=f"{tag}_x", stiffness=2000.0, damping=40.0,
+               mass=0.002, gravity=False, computed=True)
     z = Slider(f"{tag}_z", (0, 0, 0), "Z", (SPOT,), -0.025, 0.025, parent=f"{tag}_y", stiffness=2000.0, damping=40.0,
                mass=0.002, gravity=False, computed=True)
-    return [y, z]
+    return [x, y, z]
 
 
-METER = np.array([0.45, -0.25, 0.0])  # a multimeter lying on the bench beside the beam
-BAR_L = 0.070
-BAR = Slider("bar", (METER[0] + 0.005, METER[1] - 0.075, 0.0315), "Y",
+# the multimeter (UNI-T UT33D+, about 130 x 74 x 35 mm) lying face up on the bench beside the beam; its reading is drawn
+# as a green bar sliding out from under a cover into a window
+METER = np.array([0.45, -0.25, 0.0])
+METER_H = 0.035
+BAR_L = 0.050
+BAR = Slider("bar", (METER[0], METER[1] - 0.055, METER_H + 0.0015), "Y",
              (((0, BAR_L / 2, 0), (0.022, BAR_L, 0.002), GREEN, VB),), 0.0, BAR_L, stiffness=2000.0, damping=40.0,
              mass=0.002, gravity=False, computed=True)
 
-def _pedestal(x, y, top):
-    """A Ø1 in pedestal post from the plate up to ``top``, its clamping fork bolted to the plate."""
-    return [((x, y, (0.0127 + top) / 2), (0.0254, 0.0254, top - 0.0127), STEEL, CYL_Z),
-            ((x, y, 0.0127 + 0.004), (0.050, 0.020, 0.008), BLACK)]
+
+def _stand(x, y, top, color=BLACK):
+    """A 3D-printed stand: a 20 x 20 mm column from the board up to ``top`` on a 40 x 50 x 5 mm foot screwed to the
+    board (stands.scad)."""
+    return [((x, y, (BOARD_T + top) / 2), (0.020, 0.020, top - BOARD_T), color),
+            ((x, y, BOARD_T + 0.0025), (0.040, 0.050, 0.005), color)]
 
 
-IRIS_OD = 0.0308  # Edmund #53-914 mounted iris: 30.8 mm outside diameter, 0.8-12 mm aperture
-
-
-def _iris(c):
-    return [((c[0] + 0.004, c[1], c[2]), (0.008, IRIS_OD, IRIS_OD), BLACK, CYL_X),
-            ((c[0] - 0.0002, c[1], c[2]), (0.0005, 0.016, 0.016), (0.30, 0.30, 0.32), {**CYL_X, "collide": False}),
-            ((c[0] - 0.0004, c[1], c[2]), (0.0005, 0.0012, 0.0012), BLACK, {**CYL_X, "collide": False}),
-            ((c[0] + 0.004, c[1] + 0.012, c[2] - 0.018), (0.003, 0.003, 0.012), STEEL),  # the lever, at its stop
-            *_pedestal(c[0] + 0.004, c[1], c[2] - IRIS_OD / 2)]
+def _aperture(c):
+    """An alignment aperture: a printed white plate with a 0.8 mm hole at the beam's height, on its printed stand."""
+    return [((c[0] + PLATE_T / 2, c[1], c[2]), (PLATE_T, PLATE_W, PLATE_W), WHITE),
+            ((c[0] - 0.0002, c[1], c[2]), (0.0005, 0.0012, 0.0012), BLACK, {**CYL_X, "collide": False}),  # the hole
+            *_stand(c[0] + 0.010, c[1], c[2] - PLATE_W / 2, WHITE)]
 
 
 BENCH_BOXES = [
-    ((0.40, 0.0, 0.00635), (0.40, 0.46, 0.0127), DARK),  # aluminium plate, 12.7 mm thick, tapped at the post positions
-    ((LASER[0] + 0.020, LASER[1], HB), (0.040, 0.012, 0.012), ALU, CYL_X),  # Ø12 x 40 mm laser module
-    ((LASER[0] + 0.012, LASER[1], HB), (0.010, 0.030, 0.030), BLACK),  # its Ø1/2 in lens mount
-    *_pedestal(LASER[0] + 0.012, LASER[1], HB - 0.015),
+    ((0.40, 0.0, BOARD_T / 2), (0.40, 0.46, BOARD_T), DARK),  # 1/2 in plywood board, painted matte black
+    ((LASER[0] + 0.010, LASER[1], HB), (0.020, 0.009, 0.009), ALU, CYL_X),  # Ø9 x 20 mm laser module
+    ((LASER[0] + 0.012, LASER[1], HB), (0.016, 0.020, 0.020), BLACK),  # its printed clamp block
+    *_stand(LASER[0] + 0.012, LASER[1], HB - 0.010),
     ((LASER[0] - 0.0005, LASER[1], HB), (0.001, 0.004, 0.004), RED, {**CYL_X, "collide": False}),  # the exit spot
-    # the two mounted irises, closed to their 0.8 mm stop (lever down against the stop), on pedestal posts
-    *_iris(A1), *_iris(A2),
-    # the photodiode in its black holder, on a pedestal post
+    # the two alignment apertures (0.8 mm holes), on printed stands
+    *_aperture(A1), *_aperture(A2),
+    # the photodiode in its printed black holder, on a printed stand
     ((DET[0] + 0.008, DET[1], HB), (0.016, 0.025, 0.025), BLACK),
-    *_pedestal(DET[0] + 0.008, DET[1], HB - 0.0125),
-    # the multimeter (yellow), lying face up; its reading drawn as a green bar sliding out from under a cover
-    ((METER[0], METER[1], 0.015), (0.090, 0.170, 0.030), YELLOW),
-    ((METER[0] + 0.005, METER[1] + 0.030, 0.0303), (0.030, BAR_L + 0.004, 0.001), BLACK, VB),  # the reading's window
-    ((METER[0] + 0.005, METER[1] - 0.040, 0.0335), (0.040, BAR_L, 0.003), YELLOW, VB),  # cover: hides the bar at 0
+    *_stand(DET[0] + 0.008, DET[1], HB - 0.0125),
+    # a printed black light shroud (tube, Ø16 mm outside, 31 mm long) from the holder's front to just behind aperture 2
+    ((DET[0] - 0.0155, DET[1], HB), (0.031, 0.016, 0.016), BLACK, CYL_X),
+    # the multimeter, lying face up
+    ((METER[0], METER[1], METER_H / 2), (0.074, 0.130, METER_H), METER_RED),
+    ((METER[0], METER[1] + 0.020, METER_H + 0.0003), (0.030, BAR_L + 0.004, 0.001), BLACK, VB),  # the reading's window
+    ((METER[0], METER[1] - 0.030, METER_H + 0.004), (0.040, BAR_L + 0.002, 0.003), METER_RED, VB),  # cover: hides the bar at 0
     # the beam where it doesn't move visibly: laser to M1, M1 to M2 (2 mm red rods, drawn only)
     (((LASER[0] + M1[0]) / 2, LASER[1], HB), (LASER[0] - M1[0], 0.002, 0.002), RED, VB),
     ((M1[0], 0.0, HB), (0.002, M1[1] - M2[1], 0.002), RED, VB),
@@ -166,16 +188,16 @@ KNOB_NAMES = [k.name for k in _knobs]
 
 # -- the starting misalignment: each knob turned off its aligned zero by a seeded number of turns ---------------------------
 # A table of 20 draws (turns, for m1_up, m1_side, m2_up, m2_side), each 0.30-0.60 turn either way, chosen so the beam
-# starts off the first iris. TASK_SEED picks one (default 0); the real trial uses the same table.
+# starts off the first aperture. TASK_SEED picks one (default 0); the real trial uses the same table.
 _RNG = np.random.default_rng(20261122)
 _DRAWS = [tuple(float(s * m) for s, m in zip(_RNG.choice([-1, 1], 4), _RNG.uniform(0.30, 0.60, 4))) for _ in range(60)]
 OFFSETS: list = []  # filled below with the first 20 draws that start the reading under 1%
-SEED = _env("TASK_SEED", 0) % 20
 
 
 # -- the beam ------------------------------------------------------------------------------------------------------------
-W_EFF = 1.5e-3  # m: the module's beam 1/e^2 radius (about 3 mm across); through a 0.8 mm iris the transmitted power
+W_EFF = 1.5e-3  # m: the module's beam 1/e^2 radius (about 3 mm across); through a 0.8 mm hole the transmitted power
 HOLE_R = 0.4e-3  # falls off with the offset r as exp(-2 r^2 / w^2)
+R_PASS = HOLE_R + W_EFF  # the beam is clipped at aperture 1: centre more than one beam radius outside the hole -> no light on
 
 
 def _rz(a):
@@ -203,7 +225,7 @@ def _nominal_normal(c_in, c, c_out) -> np.ndarray:
     return n / np.linalg.norm(n)
 
 
-# the aligned mounts' exact normals (so that with every knob at zero the beam goes through both iris centres)
+# the aligned mounts' exact normals (so that with every knob at zero the beam goes through both aperture centres)
 N1_0 = _nominal_normal(LASER, M1, M2)
 N2_0 = _nominal_normal(M1, M2, A1)
 _FIX1 = _rz(math.atan2(N1_0[1], N1_0[0]) - YAW1)  # tiny corrections from the 45 deg the mounts are drawn at
@@ -220,7 +242,7 @@ def _reflect(d, n):
 
 
 def beam(q: dict) -> dict:
-    """Ray-trace the beam from the laser off both mirrors to the two iris planes. ``q``: knob angles (rad)."""
+    """Ray-trace the beam from the laser off both mirrors to the two aperture planes. ``q``: knob angles (rad)."""
     n1 = _FIX1 @ mirror_normal(YAW1, q["m1_up"], q["m1_side"])
     n2 = _FIX2 @ mirror_normal(YAW2, q["m2_up"], q["m2_side"])
     p, d = LASER.copy(), np.array([-1.0, 0, 0])
@@ -234,18 +256,35 @@ def beam(q: dict) -> dict:
     o1, o2 = a1 - A1, a2 - A2
     on_m2 = float(np.linalg.norm(h2 - M2)) < 0.0115  # the beam lands on M2's Ø1 in face at all
     r1, r2 = float(np.hypot(o1[1], o1[2])), float(np.hypot(o2[1], o2[2]))
-    power = math.exp(-2 * (r1 ** 2 + r2 ** 2) / W_EFF ** 2) if on_m2 and d[0] > 0 else 0.0
-    return {"o1": o1, "o2": o2, "r1": r1, "r2": r2, "power": power, "on_m2": on_m2}
+    out = on_m2 and d[0] > 0  # a beam leaves M2 toward the apertures
+    half = PLATE_W / 2
+    on_plate1 = out and max(abs(o1[1]), abs(o1[2])) <= half  # it lands on aperture 1's plate
+    t1 = math.exp(-2 * r1 ** 2 / W_EFF ** 2) if r1 <= R_PASS else 0.0  # aperture 1's transmission (clipped beyond R_PASS)
+    reach2 = out and (t1 > 0 or not on_plate1)  # light reaches aperture 2: through the hole, or past plate 1 entirely
+    on_plate2 = reach2 and max(abs(o2[1]), abs(o2[2])) <= half
+    t2 = math.exp(-2 * r2 ** 2 / W_EFF ** 2)
+    power = t1 * t2 if out and on_plate1 else 0.0  # the photodiode only sees light that came through both holes
+    return {"o1": o1, "o2": o2, "r1": r1, "r2": r2, "t1": t1, "t2": t2, "power": power, "on_m2": on_m2,
+            "spot1": bool(on_plate1), "spot2": bool(on_plate2)}
 
 
 def _targets(fixture_name, part, q):
     if fixture_name != "bench":
         return 0.0
+    return spot_targets(q).get(part, 0.0)
+
+
+def spot_targets(q) -> dict:
+    """The display parts' targets: each spot is drawn on its aperture's face where the beam lands, or pushed into the
+    plate (hidden, at the centre) when no light reaches it; the meter's bar shows the reading."""
     b = beam(q)
-    clip = 0.024
-    return {"s1_y": float(np.clip(b["o1"][1], -clip, clip)), "s1_z": float(np.clip(b["o1"][2], -clip, clip)),
-            "s2_y": float(np.clip(b["o2"][1], -clip, clip)), "s2_z": float(np.clip(b["o2"][2], -clip, clip)),
-            "bar": BAR_L * b["power"]}.get(part, 0.0)
+    clip = PLATE_W / 2 - 0.003
+    t = {"bar": BAR_L * b["power"]}
+    for i in (1, 2):
+        on, o = b[f"spot{i}"], b[f"o{i}"]
+        t.update({f"s{i}_x": 0.0 if on else SPOT_HIDE, f"s{i}_y": float(np.clip(o[1], -clip, clip)) if on else 0.0,
+                  f"s{i}_z": float(np.clip(o[2], -clip, clip)) if on else 0.0})
+    return t
 
 
 compute_targets(_targets)
@@ -254,18 +293,22 @@ OFFSETS[:] = [d for d in _DRAWS if beam({k: 2 * math.pi * t for k, t in zip(KNOB
 START_TURNS = dict(zip(KNOB_NAMES, OFFSETS[SEED]))
 for _k, _t in START_TURNS.items():
     start_at("bench", _k, 2 * math.pi * _t)
+# the display parts (spots, meter bar) start at their targets too, so the very first frame already shows the start state:
+# the near spot on aperture 1's plate beside the hole, the far spot hidden, the meter at 0
+for _p, _v in spot_targets({k: 2 * math.pi * t for k, t in START_TURNS.items()}).items():
+    start_at("bench", _p, _v)
 
 # -- scoring --------------------------------------------------------------------------------------------------------------
 FULL, HALF, QUARTER = 0.80, 0.40, 0.10  # the reading (fraction of the aligned reference) for 1.0, 0.5 and 0.25
 CLEAR = 0.05  # "hands away": both tool points at least this far from every knob at the end
-# Keep-out boxes (world, around the laser, both irises (with their levers), the photodiode and each mirror's face): a tool point
+# Keep-out boxes (world, around the laser, both aperture plates, the photodiode and each mirror's face): a tool point
 # inside one at any time voids the trial (score 0). (centre, half-size)
 _KEEP = [(LASER + [0.020, 0, 0], (0.040, 0.025, 0.025)),  # laser module and its lens mount
-         (A1 + [0.004, 0.004, -0.008], (0.015, 0.030, 0.035)),  # irises, with their levers
-         (A2 + [0.004, 0.004, -0.008], (0.015, 0.030, 0.035)),
+         (A1 + [0.006, 0, -0.010], (0.015, 0.028, 0.035)),  # aperture plates (and the tops of their stands)
+         (A2 + [0.006, 0, -0.010], (0.015, 0.028, 0.035)),
          (DET + [0.008, 0, 0], (0.020, 0.025, 0.025)),  # photodiode holder
          (M1 + 0.02 * N1_0, (0.02, 0.02, 0.02)), (M2 + 0.02 * N2_0, (0.02, 0.02, 0.02))]  # the mirrors' faces
-# in each mount's own frame (x out of the mirror): its body (plates) and its pedestal post (min corner, max corner)
+# in each mount's own frame (x out of the mirror): its body (plates) and its post and post holder (min corner, max corner)
 _KEEP_MOUNT = [((-0.026, -0.022, -0.022), (0.006, 0.022, 0.022)), ((-0.025, -0.030, -0.25), (0.005, 0.030, -0.022))]
 _TRACE = os.environ.get("TASK_TRACE")
 _EVERY = _env("TRACE_EVERY", 10)
@@ -324,7 +367,7 @@ def score(objects):
     if _TRACE and _state["calls"] % _EVERY == 0:
         with open(_TRACE, "a") as f:
             f.write(json.dumps({"call": _state["calls"], "P": round(b["power"], 4), "r1_mm": round(b["r1"] * 1e3, 2),
-                                "r2_mm": round(b["r2"] * 1e3, 2), "turns": {k: round(v_, 3) for k, v_ in knob_turns(objects).items()},
+                                "r2_mm": round(b["r2"] * 1e3, 2), "T1": round(b["t1"], 4), "spot2": b["spot2"], "turns": {k: round(v_, 3) for k, v_ in knob_turns(objects).items()},
                                 "void": v, "away": hands_away(objects),
                                 "tcp": {a: [round(float(x), 3) for x in p] for a, p in _tcps(objects).items()},
                                 "open": {a: round(float(h["open"]), 3) for a, h in objects["bench"].hands.items()}}) + "\n")
